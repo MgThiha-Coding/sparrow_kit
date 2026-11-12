@@ -1,268 +1,782 @@
-import 'package:web/web.dart' as web;
+import 'package:sparrow_kit/ssr.dart';
 
-import 'package:sparrow_kit/sparrow_kit.dart' as core;
+import '../features/portfolio/portfolio_project.dart';
 
-import '../components/contact.dart';
-import '../components/footer.dart';
-import '../components/hero.dart';
-import '../components/navbar.dart';
-import '../components/services.dart';
-import '../features/portfolio/portfolio_section.dart';
+const landingCategories = [
+  'All',
+  'Digital commerce',
+  'Brand platform',
+  'Culture & editorial',
+];
 
-const _pageTitle = 'MyCompany | Independent Creative Company';
-const _pageDescription =
-    'An independent creative company building thoughtful brands, digital '
-    'products, and experiences for people shaping what comes next.';
+const landingProjects = [
+  PortfolioProject(
+    id: '01',
+    category: 'Digital commerce',
+    title: 'Objects for everyday',
+    description:
+        'A clearer, more considered storefront for a new generation of makers.',
+    artLabel: 'FORM',
+    artCaption: 'Made to be kept.',
+    theme: 'amber',
+  ),
+  PortfolioProject(
+    id: '02',
+    category: 'Brand platform',
+    title: 'A brighter kind of energy',
+    description:
+        'A confident identity system built to move at the speed of change.',
+    artLabel: 'VOLT',
+    artCaption: 'Power your next.',
+    theme: 'lilac',
+  ),
+  PortfolioProject(
+    id: '03',
+    category: 'Culture & editorial',
+    title: 'Room for new voices',
+    description:
+        'An editorial experience that puts independent culture in focus.',
+    artLabel: 'COMMON',
+    artCaption: 'Culture, in good company.',
+    theme: 'green',
+  ),
+];
 
-class CompanyLandingPage extends core.Component<void> {
-  CompanyLandingPage() : super(null);
+String landingCategorySignalId(int index) => 'landing_category_$index';
+String landingProjectHiddenSignalId(int index) =>
+    'landing_project_${index}_hidden';
 
-  final core.HeadManager _headManager = core.HeadManager();
-
-  @override
-  void onMount() {
-    final canonicalUri = _canonicalPageUri();
-    final canonicalUrl = canonicalUri.toString();
-    final imageUrl = canonicalUri.resolve('og-image.svg').toString();
-    final openGraph = core.OpenGraphMetadata(
-      title: _pageTitle,
-      type: 'website',
-      url: canonicalUrl,
-      image: imageUrl,
-      description: _pageDescription,
-      siteName: 'MyCompany',
+HeadMetadata companyLandingMetadata() => HeadMetadata(
+      title: 'MyCompany | Independent Creative Company',
+      description:
+          'An independent creative company building thoughtful brands, digital products, and experiences for people shaping what comes next.',
+      metaTags: [
+        MetaTag.name('viewport', 'width=device-width, initial-scale=1'),
+        MetaTag.name('theme-color', '#0b1220'),
+        MetaTag.property('og:type', 'website'),
+        MetaTag.property(
+          'og:title',
+          'MyCompany | Independent Creative Company',
+        ),
+        MetaTag.property(
+          'og:description',
+          'An independent creative company building thoughtful brands, digital products, and experiences for people shaping what comes next.',
+        ),
+        MetaTag.property('og:image', '/og-image.svg'),
+        MetaTag.property('og:site_name', 'MyCompany'),
+        MetaTag.name('twitter:card', 'summary_large_image'),
+        MetaTag.name(
+          'twitter:title',
+          'MyCompany | Independent Creative Company',
+        ),
+        MetaTag.name(
+          'twitter:description',
+          'An independent creative company building thoughtful brands, digital products, and experiences for people shaping what comes next.',
+        ),
+        MetaTag.name('twitter:image', '/og-image.svg'),
+      ],
     );
-    final twitterCard = core.TwitterCardMetadata(
-      card: 'summary_large_image',
-      title: _pageTitle,
-      description: _pageDescription,
-      image: imageUrl,
-    );
 
-    _headManager.apply(
-      core.HeadMetadata(
-        title: _pageTitle,
-        description: _pageDescription,
-        canonicalUrl: canonicalUrl,
-        metaTags: [
-          ...openGraph.toMetaTags(),
-          ...twitterCard.toMetaTags(),
-        ],
-        jsonLd: [
-          core.OrganizationJsonLd(
-            name: 'MyCompany',
-            url: canonicalUrl,
-            description: _pageDescription,
-          ),
-        ],
-      ),
-    );
+class LandingPageState {
+  LandingPageState({
+    required List<Signal<String>> categorySelection,
+    required List<Signal<bool>> hiddenProjects,
+  })  : categorySelection =
+            List<Signal<String>>.unmodifiable(categorySelection),
+        hiddenProjects = List<Signal<bool>>.unmodifiable(hiddenProjects) {
+    if (this.categorySelection.length != landingCategories.length ||
+        this.hiddenProjects.length != landingProjects.length) {
+      throw ArgumentError('Landing page state does not match the page data.');
+    }
   }
 
-  @override
-  void onDispose() {
-    _headManager.dispose();
+  factory LandingPageState.initial() => LandingPageState(
+        categorySelection: [
+          for (var index = 0; index < landingCategories.length; index++)
+            Signal<String>(index == 0 ? 'true' : 'false'),
+        ],
+        hiddenProjects: [
+          for (var index = 0; index < landingProjects.length; index++)
+            Signal<bool>(false),
+        ],
+      );
+
+  final List<Signal<String>> categorySelection;
+  final List<Signal<bool>> hiddenProjects;
+
+  void selectCategory(int selectedIndex) {
+    if (selectedIndex < 0 || selectedIndex >= landingCategories.length) {
+      throw RangeError.index(selectedIndex, landingCategories);
+    }
+    for (var index = 0; index < categorySelection.length; index++) {
+      categorySelection[index].value =
+          index == selectedIndex ? 'true' : 'false';
+    }
+    for (var index = 0; index < landingProjects.length; index++) {
+      hiddenProjects[index].value = selectedIndex != 0 &&
+          landingProjects[index].category != landingCategories[selectedIndex];
+    }
   }
+}
+
+class CompanyLandingPage implements SsrComponent {
+  CompanyLandingPage(this.state);
+
+  final LandingPageState state;
 
   @override
-  web.Node render() => core.element(
+  MarkupNode render() => _element(
         'div',
         children: [
-          core.element('style', children: [_landingPageStyles]),
-          buildNavbar(),
-          core.element(
+          _element(
+            'link',
+            attributes: const {
+              'rel': 'stylesheet',
+              'href': '/landing.css',
+            },
+          ),
+          _header(),
+          _element(
             'main',
             attributes: const {'id': 'main-content'},
             children: [
-              buildHero(),
-              PortfolioSection(),
-              buildServices(),
-              buildContact(),
+              _hero(),
+              _portfolio(),
+              _services(),
+              _contact(),
             ],
           ),
-          buildFooter(),
+          _footer(),
+        ],
+      );
+
+  MarkupElement _header() => _element(
+        'header',
+        attributes: const {'class': 'site-header'},
+        children: [
+          _element(
+            'nav',
+            attributes: const {
+              'class': 'navbar shell',
+              'aria-label': 'Main navigation',
+            },
+            children: [
+              _element(
+                'a',
+                attributes: const {'class': 'brand', 'href': '#home'},
+                children: [
+                  _element(
+                    'span',
+                    attributes: const {
+                      'class': 'brand-mark',
+                      'aria-hidden': 'true',
+                    },
+                    children: [_text('M')],
+                  ),
+                  _element(
+                    'span',
+                    attributes: const {'class': 'brand-name'},
+                    children: [_text('MYCOMPANY')],
+                  ),
+                ],
+              ),
+              _element(
+                'div',
+                attributes: const {'class': 'nav-links'},
+                children: [
+                  _link('Home', '#home'),
+                  _link('Portfolio', '#portfolio'),
+                  _link('Services', '#services'),
+                  _link('Contact', '#contact'),
+                ],
+              ),
+              _link(
+                "Let's talk ↗",
+                '#contact',
+                className: 'nav-cta',
+              ),
+            ],
+          ),
+        ],
+      );
+
+  MarkupElement _hero() => _element(
+        'section',
+        attributes: const {'class': 'hero section-anchor', 'id': 'home'},
+        children: [
+          _element(
+            'div',
+            attributes: const {'class': 'hero-grid shell'},
+            children: [
+              _element(
+                'div',
+                attributes: const {'class': 'hero-copy'},
+                children: [
+                  _eyebrow('Independent creative company · Est. 2016'),
+                  _element(
+                    'h1',
+                    children: [
+                      _text('Make your next '),
+                      _element(
+                        'span',
+                        attributes: const {'class': 'text-accent'},
+                        children: [_text('big thing')],
+                      ),
+                      _text(' your best thing.'),
+                    ],
+                  ),
+                  _element(
+                    'p',
+                    attributes: const {'class': 'hero-description'},
+                    children: [
+                      _text(
+                        'We build brands, digital products, and experiences for people shaping what comes next.',
+                      ),
+                    ],
+                  ),
+                  _element(
+                    'div',
+                    attributes: const {'class': 'hero-actions'},
+                    children: [
+                      _primaryLink('Explore our work', '#portfolio'),
+                      _textLink('What we do', '#services'),
+                    ],
+                  ),
+                  _element(
+                    'div',
+                    attributes: const {'class': 'hero-proof'},
+                    children: [
+                      _element(
+                        'span',
+                        attributes: const {
+                          'class': 'proof-dot',
+                          'aria-hidden': 'true',
+                        },
+                      ),
+                      _element(
+                        'span',
+                        children: [_text('A small team for ambitious ideas')],
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              _heroArtwork(),
+            ],
+          ),
+          _element(
+            'div',
+            attributes: const {'class': 'hero-bottom shell'},
+            children: [
+              _element(
+                'span',
+                children: [_text('Selected work · 2022—2026')],
+              ),
+              _element('span', children: [_text('Scroll to explore ↓')]),
+            ],
+          ),
+        ],
+      );
+
+  MarkupElement _heroArtwork() => _element(
+        'div',
+        attributes: const {'class': 'hero-artwork', 'aria-hidden': 'true'},
+        children: [
+          _element('div', attributes: const {'class': 'art-orbit orbit-one'}),
+          _element('div', attributes: const {'class': 'art-orbit orbit-two'}),
+          _element(
+            'div',
+            attributes: const {'class': 'art-card art-card-back'},
+            children: [
+              _element('span', children: [_text('FORM / FUNCTION')]),
+              _element('strong', children: [_text('Ideas in motion.')]),
+            ],
+          ),
+          _element(
+            'div',
+            attributes: const {'class': 'art-card art-card-front'},
+            children: [
+              _element(
+                'span',
+                attributes: const {'class': 'art-card-label'},
+                children: [_text('DIGITAL / CULTURE')],
+              ),
+              _element(
+                'div',
+                attributes: const {'class': 'art-shape'},
+                children: [
+                  _element('span', children: [_text('M')]),
+                ],
+              ),
+              _element(
+                'div',
+                attributes: const {'class': 'art-card-caption'},
+                children: [
+                  _element('strong', children: [_text('New perspective')]),
+                  _element('span', children: [_text('A study in contrast')]),
+                ],
+              ),
+            ],
+          ),
+          _element(
+            'div',
+            attributes: const {'class': 'art-sticker'},
+            children: [_text('TRUSTED DELIVERY')],
+          ),
+        ],
+      );
+
+  MarkupElement _portfolio() => _element(
+        'section',
+        attributes: const {
+          'class': 'portfolio section-anchor',
+          'id': 'portfolio',
+        },
+        children: [
+          _element(
+            'div',
+            attributes: const {'class': 'shell'},
+            children: [
+              _sectionHeading(
+                eyebrow: 'A few good things',
+                title: 'Work with a point of view.',
+                description:
+                    'Different challenges, shared intent: make useful things feel unforgettable.',
+                trailing: _textLink(
+                  'All projects',
+                  'mailto:hello@mycompany.com',
+                ),
+              ),
+              _element(
+                'div',
+                attributes: const {
+                  'class': 'portfolio-filters',
+                  'role': 'group',
+                  'aria-label': 'Filter projects by category',
+                },
+                children: [
+                  for (var index = 0; index < landingCategories.length; index++)
+                    _element(
+                      'button',
+                      attributes: {
+                        'type': 'button',
+                        'class': 'portfolio-filter',
+                        'aria-pressed': SignalAttribute(
+                          landingCategorySignalId(index),
+                          state.categorySelection[index],
+                        ),
+                      },
+                      children: [_text(landingCategories[index])],
+                      events: {
+                        'click': (_) => state.selectCategory(index),
+                      },
+                    ),
+                ],
+              ),
+              _element(
+                'p',
+                attributes: const {
+                  'class': 'portfolio-status',
+                  'role': 'status',
+                },
+                children: [_text('Selected work from across our practice.')],
+              ),
+              _element(
+                'div',
+                attributes: const {'class': 'project-grid'},
+                children: [
+                  for (var index = 0; index < landingProjects.length; index++)
+                    _projectCard(index),
+                ],
+              ),
+            ],
+          ),
+        ],
+      );
+
+  MarkupElement _projectCard(int index) {
+    final project = landingProjects[index];
+    return _element(
+      'article',
+      attributes: {
+        'class': 'project-card',
+        'hidden': SignalAttribute(
+          landingProjectHiddenSignalId(index),
+          state.hiddenProjects[index],
+        ),
+      },
+      children: [
+        _element(
+          'div',
+          attributes: {'class': 'project-art project-art-${project.theme}'},
+          children: [
+            _element(
+              'span',
+              attributes: const {'class': 'art-index'},
+              children: [_text(project.id)],
+            ),
+            _element(
+              'div',
+              attributes: const {'class': 'project-art-object'},
+              children: [_text(project.artLabel)],
+            ),
+            _element(
+              'span',
+              attributes: const {'class': 'project-art-caption'},
+              children: [_text(project.artCaption)],
+            ),
+          ],
+        ),
+        _element(
+          'div',
+          attributes: const {'class': 'project-info'},
+          children: [
+            _element(
+              'span',
+              attributes: const {'class': 'project-category'},
+              children: [_text(project.category)],
+            ),
+            _element(
+              'h3',
+              children: [
+                _element(
+                  'a',
+                  attributes: const {'href': '#contact'},
+                  children: [_text('${project.title} ↗')],
+                ),
+              ],
+            ),
+            _element(
+              'p',
+              attributes: const {'class': 'project-description'},
+              children: [_text(project.description)],
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  MarkupElement _services() => _element(
+        'section',
+        attributes: const {
+          'class': 'services section-anchor',
+          'id': 'services'
+        },
+        children: [
+          _element(
+            'div',
+            attributes: const {'class': 'shell'},
+            children: [
+              _sectionHeading(
+                eyebrow: 'What we bring',
+                title: 'Good thinking. Better making.',
+                description:
+                    'From first sketch to final launch, we connect the dots between strategy, design, and technology.',
+              ),
+              _element(
+                'div',
+                attributes: const {'class': 'service-grid'},
+                children: [
+                  _serviceCard(
+                    number: '01',
+                    title: 'Brand & strategy',
+                    description:
+                        'Find your focus, sharpen your story, and build a brand people can believe in.',
+                    services: 'Positioning · Identity · Art direction',
+                  ),
+                  _serviceCard(
+                    number: '02',
+                    title: 'Digital experiences',
+                    description:
+                        'Turn complex ideas into intuitive websites and digital products.',
+                    services: 'Websites · Product design · Prototyping',
+                  ),
+                  _serviceCard(
+                    number: '03',
+                    title: 'Commerce & content',
+                    description:
+                        'Create connected shopping and publishing experiences that keep moving.',
+                    services: 'E-commerce · CMS · Campaigns',
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ],
+      );
+
+  MarkupElement _serviceCard({
+    required String number,
+    required String title,
+    required String description,
+    required String services,
+  }) =>
+      _element(
+        'article',
+        attributes: const {'class': 'service-card'},
+        children: [
+          _element(
+            'div',
+            attributes: const {'class': 'service-card-top'},
+            children: [
+              _element(
+                'span',
+                attributes: const {'class': 'service-number'},
+                children: [_text(number)],
+              ),
+              _element(
+                'span',
+                attributes: const {
+                  'class': 'service-arrow',
+                  'aria-hidden': 'true',
+                },
+                children: [_text('↗')],
+              ),
+            ],
+          ),
+          _element('h3', children: [_text(title)]),
+          _element(
+            'p',
+            attributes: const {'class': 'service-description'},
+            children: [_text(description)],
+          ),
+          _element(
+            'p',
+            attributes: const {'class': 'service-list'},
+            children: [_text(services)],
+          ),
+        ],
+      );
+
+  MarkupElement _contact() => _element(
+        'section',
+        attributes: const {'class': 'contact section-anchor', 'id': 'contact'},
+        children: [
+          _element(
+            'div',
+            attributes: const {'class': 'contact-panel shell'},
+            children: [
+              _element(
+                'div',
+                attributes: const {'class': 'contact-copy'},
+                children: [
+                  _eyebrow('Have a good one in mind?'),
+                  _element(
+                    'h2',
+                    children: [
+                      _text("Let's make "),
+                      _element(
+                        'span',
+                        attributes: const {'class': 'text-accent'},
+                        children: [_text('something matter.')],
+                      ),
+                    ],
+                  ),
+                  _element(
+                    'p',
+                    attributes: const {'class': 'contact-description'},
+                    children: [
+                      _text(
+                        "Tell us where you want to go. We'll bring thoughtful questions and a fresh pot of coffee.",
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              _element(
+                'div',
+                attributes: const {'class': 'contact-action'},
+                children: [
+                  _primaryLink(
+                    'Start a conversation',
+                    'mailto:hello@mycompany.com',
+                  ),
+                  _element(
+                    'span',
+                    attributes: const {'class': 'contact-email'},
+                    children: [_text('hello@mycompany.com')],
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ],
+      );
+
+  MarkupElement _footer() => _element(
+        'footer',
+        attributes: const {'class': 'site-footer'},
+        children: [
+          _element(
+            'div',
+            attributes: const {'class': 'shell'},
+            children: [
+              _element(
+                'div',
+                attributes: const {'class': 'footer-main'},
+                children: [
+                  _element(
+                    'div',
+                    attributes: const {'class': 'footer-about'},
+                    children: [
+                      _element(
+                        'a',
+                        attributes: const {
+                          'class': 'brand footer-brand',
+                          'href': '#home',
+                        },
+                        children: [
+                          _element(
+                            'span',
+                            attributes: const {
+                              'class': 'brand-mark',
+                              'aria-hidden': 'true',
+                            },
+                            children: [_text('M')],
+                          ),
+                          _element(
+                            'span',
+                            attributes: const {'class': 'brand-name'},
+                            children: [_text('MYCOMPANY')],
+                          ),
+                        ],
+                      ),
+                      _element(
+                        'p',
+                        attributes: const {'class': 'footer-summary'},
+                        children: [
+                          _text(
+                            'An independent creative company building thoughtful brands and digital experiences.',
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  _element(
+                    'div',
+                    attributes: const {'class': 'footer-links-group'},
+                    children: [
+                      _element(
+                        'h2',
+                        attributes: const {'class': 'footer-heading'},
+                        children: [_text('Explore')],
+                      ),
+                      _footerLink('Home', '#home'),
+                      _footerLink('Portfolio', '#portfolio'),
+                      _footerLink('Services', '#services'),
+                      _footerLink('Contact', '#contact'),
+                    ],
+                  ),
+                  _element(
+                    'div',
+                    attributes: const {'class': 'footer-links-group'},
+                    children: [
+                      _element(
+                        'h2',
+                        attributes: const {'class': 'footer-heading'},
+                        children: [_text('Say hello')],
+                      ),
+                      _footerLink(
+                        'Email us ↗',
+                        'mailto:hello@mycompany.com',
+                      ),
+                      _element(
+                        'span',
+                        attributes: const {'class': 'footer-location'},
+                        children: [_text('Brooklyn, NY · Working everywhere')],
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              _element(
+                'div',
+                attributes: const {'class': 'footer-bottom'},
+                children: [
+                  _element(
+                    'span',
+                    children: [_text('© 2026 MyCompany. All Rights Reserved.')],
+                  ),
+                  _element('span', children: [_text('Made with intention.')]),
+                ],
+              ),
+            ],
+          ),
         ],
       );
 }
 
-Uri _canonicalPageUri() {
-  final current = Uri.base;
-  final path = current.path.endsWith('/index.html')
-      ? current.path.substring(0, current.path.length - 'index.html'.length)
-      : current.path;
+MarkupElement _sectionHeading({
+  required String eyebrow,
+  required String title,
+  required String description,
+  MarkupElement? trailing,
+}) =>
+    _element(
+      'div',
+      attributes: const {'class': 'section-heading'},
+      children: [
+        _element(
+          'div',
+          children: [
+            _eyebrow(eyebrow),
+            _element('h2', children: [_text(title)]),
+            _element(
+              'p',
+              attributes: const {'class': 'section-description'},
+              children: [_text(description)],
+            ),
+          ],
+        ),
+        if (trailing != null) trailing,
+      ],
+    );
 
-  return Uri(
-    scheme: current.scheme,
-    userInfo: current.userInfo,
-    host: current.host,
-    port: current.hasPort ? current.port : null,
-    path: path.isEmpty ? '/' : path,
-  );
-}
+MarkupElement _eyebrow(String text) => _element(
+      'p',
+      attributes: const {'class': 'eyebrow'},
+      children: [_text(text)],
+    );
 
-const _landingPageStyles = '''
-:root {
-  color-scheme: dark;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background: #0b1220;
-  color: #f3f6fb;
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  scroll-behavior: smooth;
-  --page: #0b1220;
-  --panel: #111b2b;
-  --panel-soft: #172338;
-  --text: #f3f6fb;
-  --muted: #a5b1c2;
-  --line: rgba(158, 177, 201, .16);
-  --accent: #8fb4e8;
-}
+MarkupElement _primaryLink(String text, String href) => _link(
+      '$text ↗',
+      href,
+      className: 'button button-primary',
+    );
 
-* { box-sizing: border-box; }
-body { margin: 0; min-width: 320px; background: var(--page); color: var(--text); font-size: 15px; line-height: 1.6; }
-a { color: inherit; text-decoration: none; }
-a:focus-visible { outline: 2px solid var(--accent); outline-offset: 5px; }
-::selection { color: #0b1220; background: var(--accent); }
-.shell { width: min(1120px, calc(100% - 48px)); margin-inline: auto; }
-.section-anchor { scroll-margin-top: 88px; }
-.site-header { position: sticky; top: 0; z-index: 20; border-bottom: 1px solid var(--line); background: rgba(11, 18, 32, .92); backdrop-filter: blur(16px); }
-.navbar { min-height: 72px; display: flex; align-items: center; justify-content: space-between; gap: 28px; }
-.brand { display: inline-flex; align-items: center; gap: 11px; flex-shrink: 0; }
-.brand-mark { width: 32px; height: 32px; display: grid; place-items: center; border: 1px solid rgba(143, 180, 232, .35); border-radius: 8px; color: var(--accent); background: var(--panel-soft); font-size: 14px; font-weight: 750; }
-.brand-name { font-size: 12px; font-weight: 700; letter-spacing: .12em; }
-.nav-links { display: flex; align-items: center; justify-content: center; gap: clamp(18px, 3vw, 42px); }
-.nav-links a, .nav-cta { color: #c2ccda; font-size: 13px; transition: color .2s ease, border-color .2s ease, background .2s ease; }
-.nav-links a:hover, .footer-link:hover { color: var(--accent); }
-.nav-cta { display: inline-flex; align-items: center; gap: 12px; padding: 10px 15px; border: 1px solid #34445b; border-radius: 6px; color: var(--text); }
-.nav-cta:hover { border-color: var(--accent); color: var(--accent); }
-.hero { position: relative; overflow: hidden; min-height: 590px; display: flex; flex-direction: column; justify-content: center; padding: 72px 0 28px; border-bottom: 1px solid var(--line); }
-.hero::before { content: ""; position: absolute; width: 540px; height: 540px; top: -230px; right: -150px; pointer-events: none; background: radial-gradient(circle, rgba(90, 133, 190, .12), transparent 70%); }
-.hero-grid { position: relative; display: grid; grid-template-columns: 1.08fr .92fr; align-items: center; gap: 56px; }
-.hero-copy { max-width: 620px; }
-.eyebrow { margin: 0 0 18px; color: var(--accent); font-size: 11px; font-weight: 650; letter-spacing: .11em; text-transform: uppercase; }
-h1, h2, h3, p { margin-top: 0; }
-.hero h1 { max-width: 640px; margin-bottom: 22px; font-size: clamp(42px, 5.2vw, 64px); font-weight: 650; letter-spacing: -.045em; line-height: 1.08; }
-.text-accent { color: var(--accent); }
-.hero-description { max-width: 500px; margin-bottom: 28px; color: var(--muted); font-size: 16px; line-height: 1.75; }
-.hero-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 25px; }
-.button { display: inline-flex; min-height: 46px; align-items: center; justify-content: center; padding: 0 18px; border-radius: 6px; font-size: 13px; font-weight: 650; transition: transform .2s ease, background .2s ease, border-color .2s ease; }
-.button:hover { transform: translateY(-1px); }
-.button-primary { color: #0b1220; background: var(--accent); }
-.button-primary:hover { background: #a8c8f2; }
-.text-link { display: inline-flex; align-items: center; gap: 11px; color: var(--text); font-size: 13px; font-weight: 650; }
-.text-link:hover { color: var(--accent); }
-.hero-proof { display: flex; align-items: center; gap: 10px; margin-top: 38px; color: var(--muted); font-size: 12px; }
-.proof-dot { width: 8px; height: 8px; border-radius: 50%; background: #79a3d8; }
-.hero-artwork { position: relative; min-height: 390px; display: grid; place-items: center; isolation: isolate; }
-.art-orbit { position: absolute; border: 1px solid rgba(143, 180, 232, .12); border-radius: 50%; }
-.orbit-one { width: 350px; height: 350px; transform: rotate(-24deg) scaleY(.72); }
-.orbit-two { width: 290px; height: 290px; transform: rotate(38deg) scaleY(.72); }
-.art-card { position: absolute; display: flex; flex-direction: column; justify-content: space-between; padding: 22px; border: 1px solid rgba(190, 207, 228, .2); border-radius: 12px; box-shadow: 0 24px 64px rgba(0,0,0,.3); }
-.art-card-back { z-index: -1; width: 250px; height: 300px; transform: translate(42px,-12px) rotate(3deg); color: #dce7f6; background: linear-gradient(145deg, #1d2c41, #142033); }
-.art-card-back span, .art-card-label { font-size: 9px; font-weight: 800; letter-spacing: .15em; }
-.art-card-back strong { max-width: 180px; font-size: 27px; font-weight: 650; letter-spacing: -.035em; line-height: 1.12; }
-.art-card-front { z-index: 1; width: 260px; height: 326px; transform: translate(-15px, 18px); background: linear-gradient(150deg, #17253a, #101a2a 65%); }
-.art-card-label { color: var(--accent); }
-.art-shape { position: relative; width: 142px; height: 142px; align-self: center; display: grid; place-items: center; border: 1px solid rgba(143, 180, 232, .55); border-radius: 22px; background: linear-gradient(145deg, rgba(93, 133, 185, .3), rgba(24, 39, 61, .65)); }
-.art-shape span { color: #c3d7f2; font-size: 58px; font-weight: 650; letter-spacing: -.06em; }
-.art-card-caption { display: flex; flex-direction: column; gap: 5px; }
-.art-card-caption strong { font-size: 13px; }
-.art-card-caption span { color: var(--muted); font-size: 10px; }
-.art-sticker { position: absolute; right: 3%; bottom: 1%; z-index: 2; display: flex; align-items: center; justify-content: center; padding: 9px 12px; border: 1px solid #344a67; border-radius: 8px; color: #dce7f6; background: #17263a; font-size: 9px; font-weight: 700; letter-spacing: .08em; white-space: nowrap; }
-.hero-bottom { position: relative; display: flex; justify-content: space-between; margin-top: 46px; color: #8190a4; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
-.portfolio, .services { padding: 96px 0 104px; border-bottom: 1px solid var(--line); }
-.section-heading { display: flex; align-items: end; justify-content: space-between; gap: 35px; margin-bottom: 40px; }
-.section-heading h2, .contact h2 { max-width: 720px; margin-bottom: 14px; font-size: clamp(30px, 3.8vw, 44px); font-weight: 620; letter-spacing: -.04em; line-height: 1.14; }
-.section-description { max-width: 540px; margin-bottom: 0; color: var(--muted); font-size: 15px; line-height: 1.7; }
-.section-heading > .text-link { margin-bottom: 7px; flex-shrink: 0; }
-.project-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
-.project-card { min-width: 0; }
-.portfolio-filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 30px 0; }
-.portfolio-filter { padding: 8px 12px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: transparent; font: inherit; font-size: 11px; cursor: pointer; }
-.portfolio-filter[aria-pressed="true"] { border-color: var(--accent); color: var(--text); background: var(--panel-soft); }
-.portfolio-status { min-height: 1.5em; margin: 0 0 20px; color: var(--muted); font-size: 12px; }
-.portfolio-error { color: #ffb4a2; }
-.portfolio-retry { padding: 7px 11px; border: 1px solid var(--line); border-radius: 5px; color: var(--text); background: var(--panel-soft); font: inherit; font-size: 11px; cursor: pointer; }
-.project-art { position: relative; overflow: hidden; min-height: 290px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 10px; }
-.project-art-amber { color: #e8eef7; background: linear-gradient(145deg, #1a2a3f, #142034); }
-.project-art-lilac { color: #e8eef7; background: linear-gradient(145deg, #1d2b40, #172238); }
-.project-art-green { color: #e8eef7; background: linear-gradient(145deg, #192c3b, #142232); }
-.project-art::before, .project-art::after { content: ""; position: absolute; border: 1px solid rgba(204, 220, 241, .14); border-radius: 50%; }
-.project-art::before { width: 230px; height: 230px; }
-.project-art::after { width: 280px; height: 280px; }
-.art-index { position: absolute; top: 19px; left: 19px; z-index: 1; font-size: 10px; font-weight: 700; }
-.project-art-object { position: relative; z-index: 1; width: 150px; height: 176px; display: grid; place-items: center; border: 1px solid rgba(194, 214, 240, .28); border-radius: 12px; background: linear-gradient(145deg, rgba(117, 153, 200, .22), rgba(25, 42, 64, .82)); box-shadow: 0 22px 50px rgba(0,0,0,.24); font-size: 28px; font-weight: 700; letter-spacing: -.04em; transition: transform .25s ease, border-color .25s ease; }
-.project-card:hover .project-art-object { transform: translateY(-4px); border-color: rgba(194, 214, 240, .55); }
-.project-art-caption { position: absolute; right: 18px; bottom: 18px; z-index: 1; font-size: 10px; font-weight: 650; }
-.project-info { padding: 18px 2px 0; }
-.project-category { color: #9dbbe4; font-size: 10px; font-weight: 650; letter-spacing: .09em; }
-.project-info h3 { margin: 9px 0 7px; font-size: 18px; font-weight: 620; letter-spacing: -.02em; }
-.project-info h3 a:hover { color: var(--accent); }
-.project-description { max-width: 350px; margin-bottom: 0; color: var(--muted); font-size: 13px; line-height: 1.7; }
-.services { background: #0e1726; }
-.service-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
-.service-card { min-height: 275px; padding: 27px 25px 25px 0; }
-.service-card + .service-card { padding-left: 25px; border-left: 1px solid var(--line); }
-.service-card-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 42px; }
-.service-number { color: var(--accent); font-size: 11px; font-weight: 700; }
-.service-arrow { color: #8998ad; font-size: 17px; }
-.service-card h3 { margin-bottom: 12px; font-size: 19px; font-weight: 620; letter-spacing: -.02em; }
-.service-description { min-height: 66px; margin-bottom: 19px; color: var(--muted); font-size: 13px; line-height: 1.7; }
-.service-list { margin-bottom: 0; color: #c2ccda; font-size: 11px; letter-spacing: .01em; }
-.contact { padding: 84px 0; }
-.contact-panel { display: flex; align-items: end; justify-content: space-between; gap: 50px; padding: 50px; border: 1px solid #2a3a50; border-radius: 12px; background: linear-gradient(120deg, rgba(31, 51, 77, .44), rgba(17, 27, 43, .95) 58%), var(--panel); }
-.contact-copy { max-width: 650px; }
-.contact h2 { margin-bottom: 17px; }
-.contact-description { max-width: 480px; margin-bottom: 0; color: var(--muted); font-size: 14px; line-height: 1.75; }
-.contact-action { display: flex; flex-direction: column; align-items: flex-start; gap: 13px; flex-shrink: 0; }
-.contact-email { color: var(--muted); font-size: 11px; }
-.site-footer { padding: 56px 0 22px; border-top: 1px solid var(--line); background: #080e18; }
-.footer-main { display: grid; grid-template-columns: 1.6fr .7fr .8fr; gap: 70px; padding-bottom: 55px; }
-.footer-brand { margin-bottom: 18px; }
-.footer-summary { max-width: 300px; margin-bottom: 0; color: #94a1b4; font-size: 12px; line-height: 1.75; }
-.footer-links-group { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
-.footer-heading { margin: 3px 0 6px; color: #8998ad; font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
-.footer-link, .footer-links-group > a { color: #c2ccda; font-size: 12px; }
-.footer-location { color: #94a1b4; font-size: 11px; line-height: 1.6; }
-.footer-bottom { display: flex; justify-content: space-between; gap: 20px; padding-top: 19px; border-top: 1px solid var(--line); color: #8190a4; font-size: 10px; }
-@media (max-width: 820px) {
-  .hero { min-height: auto; padding-top: 75px; }
-  .hero-grid { grid-template-columns: 1fr; gap: 20px; }
-  .hero-artwork { min-height: 370px; }
-  .hero-bottom { margin-top: 30px; }
-  .project-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .project-card:last-child { grid-column: 1 / -1; }
-  .project-card:last-child .project-art { min-height: 280px; }
-  .contact-panel { align-items: flex-start; flex-direction: column; padding: 42px; }
-  .footer-main { gap: 35px; }
-}
-@media (max-width: 600px) {
-  .shell { width: min(100% - 36px, 480px); }
-  .navbar { min-height: 68px; flex-wrap: wrap; gap: 0; padding-block: 12px; }
-  .brand-name { font-size: 10px; }
-  .nav-cta { padding: 9px 10px; font-size: 11px; }
-  .nav-links { order: 3; width: 100%; justify-content: space-between; gap: 8px; padding-top: 14px; }
-  .nav-links a { font-size: 11px; }
-  .hero { padding-top: 60px; }
-  .hero h1 { font-size: clamp(40px, 11vw, 56px); }
-  .hero-description { font-size: 15px; }
-  .hero-proof { margin-top: 35px; }
-  .hero-artwork { min-height: 330px; transform: scale(.88); }
-  .hero-bottom { font-size: 8px; letter-spacing: .06em; }
-  .portfolio, .services { padding: 78px 0; }
-  .section-heading { align-items: flex-start; flex-direction: column; gap: 22px; margin-bottom: 32px; }
-  .section-heading h2, .contact h2 { font-size: 34px; }
-  .project-grid, .service-grid { grid-template-columns: 1fr; }
-  .project-card:last-child { grid-column: auto; }
-  .project-art, .project-card:last-child .project-art { min-height: 300px; }
-  .service-card, .service-card + .service-card { min-height: auto; padding: 24px 0; border-left: 0; }
-  .service-card + .service-card { border-top: 1px solid var(--line); }
-  .service-card-top { margin-bottom: 26px; }
-  .service-description { min-height: 0; }
-  .contact { padding: 65px 0; }
-  .contact-panel { gap: 30px; padding: 29px 24px; }
-  .footer-main { grid-template-columns: 1fr 1fr; gap: 35px 20px; }
-  .footer-about { grid-column: 1 / -1; }
-  .footer-bottom { align-items: flex-start; flex-direction: column; gap: 9px; }
-}
-''';
+MarkupElement _textLink(String text, String href) => _link(
+      '$text ↗',
+      href,
+      className: 'text-link',
+    );
+
+MarkupElement _footerLink(String text, String href) => _link(
+      text,
+      href,
+      className: 'footer-link',
+    );
+
+MarkupElement _link(String text, String href, {String? className}) => _element(
+      'a',
+      attributes: {
+        if (className != null) 'class': className,
+        'href': href,
+      },
+      children: [_text(text)],
+    );
+
+MarkupElement _element(
+  String tag, {
+  Map<String, Object?> attributes = const {},
+  Iterable<MarkupNode> children = const [],
+  Map<String, MarkupEventHandler> events = const {},
+}) =>
+    MarkupElement(
+      tag,
+      attributes: attributes,
+      children: children,
+      events: events,
+    );
+
+MarkupText _text(String text) => MarkupText(text);

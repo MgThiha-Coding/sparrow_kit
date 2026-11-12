@@ -1,7 +1,4 @@
-import 'package:sparrow_kit/sparrow_kit.dart';
-import 'package:web_app/app/pages/landing_page.dart';
+import 'package:sparrow_kit/sparrow_kit.dart' show hydrateApp;
+import 'package:web_app/main.dart' show buildCompanyLandingPage;
 
-void main() {
-  final Component<void> rootApplication = CompanyLandingPage();
-  runApp(rootApplication);
-}
+void main() => hydrateApp(buildCompanyLandingPage);

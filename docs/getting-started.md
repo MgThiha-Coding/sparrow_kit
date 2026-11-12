@@ -64,4 +64,4 @@ dart compile js web/main.dart -O2 -o web/main.dart.js
 
 The `element()` DSL creates browser DOM nodes directly. Passing a signal as a child binds the text node to its current value; the click handler updates it without a virtual DOM diff. `runApp` mounts into `#app` by default and initializes baseline SEO metadata from the existing document, using safe defaults when the document has none. Provide `HeadMetadata` to customize page-specific SEO.
 
-For a complete app in this repository, use `apps/web_app/web/main.dart`. Its build command and the SSR example are in the root [README](../README.md#build-the-example-web-app).
+For the company landing page in this repository, run `dart run sparrow_cli build web` from `apps/web_app`. Its browser entry hydrates the same shared landing page rendered by the configured static-site entry point.

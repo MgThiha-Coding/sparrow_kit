@@ -159,4 +159,4 @@ await StaticSiteGenerator(clientScript: '/client.js').generate(
 );
 ```
 
-For request-time SSR, call `renderToString()` from an HTTP handler and return the HTML with a `text/html; charset=utf-8` content type. The sample Shelf handler is `apps/web_app/bin/ssr_server.dart`; Sparrow Kit provides rendering primitives, not a framework-specific HTTP server adapter. Put production TLS, caching, compression, error handling, and request timeouts at the server or reverse-proxy layer.
+For request-time SSR, call `renderToString()` from an HTTP handler and return the HTML with a `text/html; charset=utf-8` content type. The Shelf handler in `apps/web_app/bin/ssr_server.dart` renders the same company landing page used by the static build. `apps/web_app/bin/site.dart` is the configured static-generation entry point used by `sparrow_cli`. Sparrow Kit provides rendering primitives, not a framework-specific HTTP server adapter. Put production TLS, caching, compression, error handling, and request timeouts at the server or reverse-proxy layer.

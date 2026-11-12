@@ -127,7 +127,7 @@ dev_dependencies:
 The build command:
 
 1. Runs `dart analyze` on the configured client and server entry points.
-2. Copies non-Dart assets from `web/` into the output directory.
+2. Clears the output directory, then copies non-Dart assets from `web/`.
 3. Runs the server entry point with the output directory and root-relative client script. That entry point owns the explicit route list and SSR.
 4. Compiles the configured browser entry point with `dart compile js`.
 
@@ -136,6 +136,13 @@ The analyzer checks Dart validity and types. It is not used to execute component
 In this monorepo, run from `examples/ui_contract`:
 
 ```sh
+dart run sparrow_cli build web
+```
+
+The company landing page is wired to the same workflow in `apps/web_app`:
+
+```sh
+cd apps/web_app
 dart run sparrow_cli build web
 ```
 

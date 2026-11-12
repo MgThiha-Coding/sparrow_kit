@@ -1,10 +1,3 @@
-import 'package:sparrow_kit/sparrow_kit.dart';
-import 'package:web_app/app/pages/counter_page.dart';
+import 'main.dart' as landing_page;
 
-void main() {
-  hydrateApp(
-    (state) => CounterPage(
-      count: state.signal<int>('count', fallback: 0),
-    ).render(),
-  );
-}
+void main() => landing_page.main();

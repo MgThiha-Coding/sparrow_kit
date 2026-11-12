@@ -11,3 +11,7 @@ dependencies:
     path: ../../packages/sparrow_kit
   shelf: '>=1.4.2 <1.4.3'
   web: ^0.5.0
+
+dev_dependencies:
+  sparrow_cli:
+    path: ../../packages/sparrow_cli

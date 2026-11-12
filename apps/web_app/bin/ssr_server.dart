@@ -2,53 +2,66 @@ import 'dart:io';
 
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as shelf_io;
-
 import 'package:sparrow_kit/server.dart';
-import 'package:web_app/app/pages/counter_page.dart';
+import 'package:web_app/app/pages/landing_page.dart';
 
 Future<void> main() async {
+  final appDirectory = File.fromUri(Platform.script).parent.parent;
+  final outputDirectory = Directory(
+    '${appDirectory.path}${Platform.pathSeparator}build'
+    '${Platform.pathSeparator}web',
+  );
+  final webDirectory = Directory(
+    '${appDirectory.path}${Platform.pathSeparator}web',
+  );
   final renderer = StringRenderer();
   final pipeline = const Pipeline().addMiddleware(logRequests()).addHandler((
     request,
   ) async {
-    if (request.method == 'GET' && request.url.path == 'client.js') {
-      final clientScript = File('apps/web_app/web/ssr_client.dart.js');
-      if (!await clientScript.exists()) {
-        return Response.notFound(
-          'Compile the client with: dart compile js apps/web_app/web/ssr_client.dart -O2 -o apps/web_app/web/ssr_client.dart.js',
-        );
-      }
+    if (request.method != 'GET') {
+      return Response(HttpStatus.methodNotAllowed);
+    }
 
+    final path = request.url.path;
+    if (path.isEmpty || path == 'index.html') {
       return Response.ok(
-        await clientScript.readAsBytes(),
-        headers: {'content-type': 'application/javascript; charset=utf-8'},
+        renderer.render(
+          CompanyLandingPage(LandingPageState.initial()),
+          metadata: companyLandingMetadata(),
+          clientScript: '/main.dart.js',
+        ),
+        headers: {'content-type': 'text/html; charset=utf-8'},
       );
     }
 
-    if (request.method != 'GET' ||
-        (request.url.path.isNotEmpty && request.url.path != 'index.html')) {
-      return Response.notFound('Not found');
+    final file = switch (path) {
+      'main.dart.js' => File(
+          '${outputDirectory.path}${Platform.pathSeparator}main.dart.js',
+        ),
+      'og-image.svg' => File(
+          '${webDirectory.path}${Platform.pathSeparator}og-image.svg',
+        ),
+      'landing.css' => File(
+          '${webDirectory.path}${Platform.pathSeparator}landing.css',
+        ),
+      _ => null,
+    };
+    if (file == null) return Response.notFound('Not found');
+    if (!await file.exists()) {
+      return Response.notFound(
+        'Build the site first with "sparrow build web".',
+      );
     }
 
-    final metadata = HeadMetadata(
-      title: 'SSR Counter',
-      description: 'A counter rendered on the server and hydrated in place.',
-      canonicalUrl: 'http://localhost:8080/',
-      metaTags: [
-        MetaTag.property('og:title', 'SSR Counter'),
-        MetaTag.property('og:type', 'website'),
-        MetaTag.property('og:url', 'http://localhost:8080/'),
-      ],
-    );
-    final html = renderer.render(
-      CounterPage(initialCount: 3),
-      metadata: metadata,
-      clientScript: '/client.js',
-    );
-
     return Response.ok(
-      html,
-      headers: {'content-type': 'text/html; charset=utf-8'},
+      await file.readAsBytes(),
+      headers: {
+        'content-type': switch (path) {
+          'main.dart.js' => 'application/javascript; charset=utf-8',
+          'landing.css' => 'text/css; charset=utf-8',
+          _ => 'image/svg+xml',
+        },
+      },
     );
   });
 
@@ -58,5 +71,6 @@ Future<void> main() async {
     8080,
   );
   stdout.writeln(
-      'SSR example listening on http://${server.address.host}:${server.port}');
+    'SSR landing page listening on http://${server.address.host}:${server.port}',
+  );
 }

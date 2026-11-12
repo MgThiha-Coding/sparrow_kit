@@ -130,7 +130,13 @@ sparrow build web
 
 `sparrow dev` builds the configured app and serves it with live reload.
 `sparrow build web` creates the production site in `build/web`, compiling the
-browser entrypoint with Dart's optimized JavaScript compiler.
+browser entrypoint with Dart's optimized JavaScript compiler. To build this
+repository's company landing page, run the command from its configured app:
+
+```sh
+cd apps/web_app
+dart run sparrow_cli build web
+```
 
 ## What the CLI automates
 
@@ -152,7 +158,7 @@ uses `StaticSiteGenerator` to render the initial route from the shared page in
 `lib/`. When you run `sparrow build web`, the CLI:
 
 1. Analyzes the configured client and server entrypoints.
-2. Copies non-Dart assets from `web/` into the output directory.
+2. Clears the target output directory and copies non-Dart assets from `web/`.
 3. Runs the server entrypoint to generate the declared SSR routes and HTML.
 4. Compiles the client entrypoint with `dart compile js -O2`.
 
