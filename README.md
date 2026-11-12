@@ -1,8 +1,17 @@
-# SparrowKit
+<p align="center">
+  <img src="assets/logo.png" alt="SparrowKit logo" width="128">
+</p>
 
-SparrowKit is a DOM-first web framework for Dart. It combines functional components, fine-grained signals, browser routing, server-rendered markup, hydration, and SEO helpers in a small package at `packages/sparrow_kit`.
+<h1 align="center">SparrowKit</h1>
 
-> **SDK:** Dart 3.6 or newer. The repository is a Pub workspace.
+<p align="center">
+  <a href="https://dart.dev"><img src="https://img.shields.io/badge/Dart-3.6%2B-0175C2?logo=dart&logoColor=white" alt="Dart SDK 3.6 or newer"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License"></a>
+</p>
+
+<p align="center">A DOM-first web framework for Dart, combining functional components, fine-grained signals, browser routing, server-rendered markup, hydration, and SEO helpers.</p>
+
+> The repository is a Pub workspace. The SparrowKit package requires Dart 3.6 or newer.
 
 ## Why SparrowKit
 
