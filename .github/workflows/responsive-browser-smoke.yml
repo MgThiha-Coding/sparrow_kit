@@ -1,0 +1,58 @@
+name: Responsive browser smoke
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  browser-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - uses: browser-actions/setup-chrome@v1
+        id: chrome
+
+      - name: Fetch Dart workspace dependencies
+        run: dart pub get
+
+      - name: Compile browser smoke fixture
+        run: >-
+          dart compile js tool/ui_contract_browser_smoke.dart
+          -O2 -o tool/ui_contract_browser_smoke.dart.js
+
+      - name: Run viewport and hydration checks in Chrome
+        env:
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+        run: |
+          python3 -m http.server 8765 --bind 127.0.0.1 \
+            > "$RUNNER_TEMP/sparrow-http.log" 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid"' EXIT
+
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8765/tool/ui_contract_responsive_ci.html > /dev/null; then
+              break
+            fi
+            sleep 1
+          done
+
+          "$CHROME_PATH" \
+            --headless \
+            --no-sandbox \
+            --disable-gpu \
+            --disable-dev-shm-usage \
+            --virtual-time-budget=60000 \
+            --dump-dom \
+            http://127.0.0.1:8765/tool/ui_contract_responsive_ci.html \
+            > "$RUNNER_TEMP/sparrow-responsive-browser-result.html"
+
+          cat "$RUNNER_TEMP/sparrow-responsive-browser-result.html"
+          grep -q 'data-ci-status="passed"' \
+            "$RUNNER_TEMP/sparrow-responsive-browser-result.html"

@@ -7,6 +7,7 @@ import '../core/ssr/markup.dart';
 import '../reactivity/signals.dart' show Signal, onCleanup;
 import '../rendering/component.dart' as runtime;
 import '../rendering/dom_patcher.dart';
+import '../rendering/dom_stylesheets.dart';
 import 'ui.dart';
 
 class DomUiRenderer {
@@ -22,7 +23,9 @@ class DomUiRenderer {
     }
 
     try {
-      final root = _renderNode(toMarkupNode(description));
+      final tree = toMarkupNode(description);
+      _cleanups.add(installMarkupStylesheets(tree));
+      final root = _renderNode(tree);
       _root = root;
       return root;
     } catch (_) {

@@ -9,9 +9,12 @@ import 'metadata.dart';
 export 'metadata.dart' show HeadMetadata;
 
 class HeadManager {
-  HeadManager() : _originalTitle = web.document.title;
+  HeadManager()
+      : _originalTitle = web.document.title,
+        _originalLanguage = web.document.documentElement?.getAttribute('lang');
 
   final String _originalTitle;
+  final String? _originalLanguage;
   final Map<String, _MetaBinding> _metaBindings = {};
   final List<web.HTMLScriptElement> _jsonLdScripts = [];
   _LinkBinding? _canonicalBinding;
@@ -45,8 +48,13 @@ class HeadManager {
     if (head == null) {
       throw StateError('The document has no head element.');
     }
+    final documentElement = web.document.documentElement;
+    if (documentElement == null) {
+      throw StateError('The document has no root element.');
+    }
 
     web.document.title = metadata.title;
+    documentElement.setAttribute('lang', metadata.language);
     _applyCanonical(head, metadata.canonicalUrl);
     _applyMetaTags(head, metadata);
     _applyJsonLd(head, metadata.jsonLd);
@@ -75,6 +83,15 @@ class HeadManager {
     }
     _jsonLdScripts.clear();
     web.document.title = _originalTitle;
+    final documentElement = web.document.documentElement;
+    if (documentElement != null) {
+      final originalLanguage = _originalLanguage;
+      if (originalLanguage == null) {
+        documentElement.removeAttribute('lang');
+      } else {
+        documentElement.setAttribute('lang', originalLanguage);
+      }
+    }
   }
 
   void _applyMetaTags(web.HTMLHeadElement head, HeadMetadata metadata) {
@@ -84,7 +101,7 @@ class HeadManager {
       final tag = MetaTag.name('description', description);
       desired[tag.id] = tag;
     }
-    for (final tag in metadata.metaTags) {
+    for (final tag in metadata.renderedMetaTags) {
       desired[tag.id] = tag;
     }
 

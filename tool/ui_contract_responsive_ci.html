@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Sparrow Kit responsive browser CI</title>
+  </head>
+  <body data-ci-status="running">
+    <pre id="results"></pre>
+    <script>
+      const cases = [
+        { width: 375, direction: 'column', gap: '8px', alignment: 'flex-start' },
+        { width: 768, direction: 'row', gap: '12px', alignment: 'center' },
+        { width: 1440, direction: 'row', gap: '24px', alignment: 'center' },
+      ];
+      const results = [];
+      const output = document.getElementById('results');
+
+      async function runCase(testCase) {
+        const frame = document.createElement('iframe');
+        frame.title = `${testCase.width}px responsive browser smoke`;
+        frame.style.cssText =
+          `display:block;width:${testCase.width}px;height:500px;border:0`;
+        frame.src = '/tool/ui_contract_browser_smoke.html';
+        document.body.appendChild(frame);
+
+        const startedAt = Date.now();
+        while (Date.now() - startedAt < 15000) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          const frameDocument = frame.contentDocument;
+          if (frameDocument?.body?.dataset.testResult !== 'passed') continue;
+
+          const root = frameDocument.querySelector('#app > section');
+          if (!root) throw new Error(`${testCase.width}px: responsive root missing`);
+          const style = frame.contentWindow.getComputedStyle(root);
+          const actual = {
+            viewport: frame.contentWindow.innerWidth,
+            direction: style.flexDirection,
+            gap: style.gap,
+            alignment: style.alignItems,
+          };
+          const expected = {
+            viewport: testCase.width,
+            direction: testCase.direction,
+            gap: testCase.gap,
+            alignment: testCase.alignment,
+          };
+          if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+            throw new Error(
+              `${testCase.width}px: expected ${JSON.stringify(expected)}, `
+              + `received ${JSON.stringify(actual)}`,
+            );
+          }
+          frame.remove();
+          return actual;
+        }
+
+        throw new Error(`${testCase.width}px: browser smoke did not complete`);
+      }
+
+      async function run() {
+        try {
+          for (const testCase of cases) {
+            results.push(await runCase(testCase));
+          }
+          output.textContent = JSON.stringify(results);
+          document.body.dataset.ciStatus = 'passed';
+        } catch (error) {
+          output.textContent = error.stack || String(error);
+          document.body.dataset.ciStatus = 'failed';
+        }
+      }
+
+      run();
+    </script>
+  </body>
+</html>

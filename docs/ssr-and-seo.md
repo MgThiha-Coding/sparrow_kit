@@ -39,7 +39,7 @@ class CounterPage implements SsrComponent {
 
 ## Render HTML with metadata
 
-`HeadMetadata` represents a page title, description, canonical URL, arbitrary meta tags, and JSON-LD schemas. Use `OpenGraphMetadata` and `TwitterCardMetadata` to generate their property/name tags:
+`HeadMetadata` represents page-level title, description, canonical URL, document language, locale, robots directives, Open Graph and Twitter metadata, arbitrary meta tags, and JSON-LD schemas. Structured metadata is serialized into the initial HTML; `HeadManager` applies the same fields during client rendering and hydration.
 
 ```dart
 final pageUrl = Uri.parse('https://example.com/counter');
@@ -51,22 +51,23 @@ final metadata = HeadMetadata(
   title: pageTitle,
   description: pageDescription,
   canonicalUrl: pageUrl.toString(),
-  metaTags: [
-    ...OpenGraphMetadata(
-      title: pageTitle,
-      type: 'website',
-      url: pageUrl.toString(),
-      image: previewImage,
-      description: pageDescription,
-      siteName: 'Example',
-    ).toMetaTags(),
-    ...TwitterCardMetadata(
-      card: 'summary_large_image',
-      title: pageTitle,
-      description: pageDescription,
-      image: previewImage,
-    ).toMetaTags(),
-  ],
+  language: 'en',
+  locale: 'en_US',
+  openGraph: OpenGraphMetadata(
+    title: pageTitle,
+    type: 'website',
+    url: pageUrl.toString(),
+    image: previewImage,
+    description: pageDescription,
+    siteName: 'Example',
+  ),
+  twitterCard: TwitterCardMetadata(
+    card: 'summary_large_image',
+    title: pageTitle,
+    description: pageDescription,
+    image: previewImage,
+  ),
+  robots: const RobotsDirectives(index: true, follow: true),
   jsonLd: [
     OrganizationJsonLd(
       name: 'Example',
@@ -77,7 +78,7 @@ final metadata = HeadMetadata(
 );
 ```
 
-Pass the metadata to `renderToString()` to render the title, description, canonical link, Open Graph/Twitter tags, and JSON-LD `<script type="application/ld+json">` into the initial response:
+Pass the metadata to `renderToString()` to render the document language, title, description, canonical link, Open Graph/Twitter tags, robots directives, locale, and JSON-LD `<script type="application/ld+json">` into the initial response. Existing `metaTags` remain supported; structured fields take precedence over a raw tag with the same name/property.
 
 ```dart
 final html = renderToString(
@@ -142,12 +143,15 @@ The renderer emits the initial markup and signal values; `hydrateApp()` reads th
 
 ## Static generation and HTTP integration
 
-For file-based output, `StaticSiteGenerator` accepts `StaticPage` entries and writes an `index.html` under each page path:
+For file-based output, `StaticSiteGenerator` accepts `StaticPage` entries and writes an `index.html` under each page path. Each page can carry its own `HeadMetadata`, so the route's initial HTML contains that route's metadata. A configured site origin supplies a trailing-slash canonical URL when the page metadata does not specify one:
 
 ```dart
 import 'package:sparrow_kit/server.dart';
 
-await StaticSiteGenerator(clientScript: '/client.js').generate(
+await StaticSiteGenerator(
+  clientScript: '/client.js',
+  siteBaseUrl: 'https://example.com',
+).generate(
   [
     StaticPage(
       path: '/',
@@ -158,5 +162,9 @@ await StaticSiteGenerator(clientScript: '/client.js').generate(
   outputDirectory: 'build',
 );
 ```
+
+`siteBaseUrl` must be an absolute HTTP or HTTPS origin with no credentials, path, query, or fragment. Supplying it enables deterministic `sitemap.xml` and `robots.txt` generation by default; `generateSeoFiles: true` requires a site origin. Explicit canonical URLs must be absolute HTTP(S) URLs without query or fragment. Same-origin indexable canonicals are included once in the sorted sitemap; external canonicals and pages marked `indexable: false` or `robots.index: false` are omitted. `indexable: false` also emits a `noindex` robots meta directive. `robots.txt` allows crawling and advertises the generated sitemap.
+
+Without a site origin, existing static generation remains HTML-only and keeps its prior canonical behavior. For the `apps/web_app` static build, set `SPARROW_SITE_URL` to the production origin to enable canonical inference and SEO files.
 
 For request-time SSR, call `renderToString()` from an HTTP handler and return the HTML with a `text/html; charset=utf-8` content type. The Shelf handler in `apps/web_app/bin/ssr_server.dart` renders the same company landing page used by the static build. `apps/web_app/bin/site.dart` is the configured static-generation entry point used by `sparrow_cli`. Sparrow Kit provides rendering primitives, not a framework-specific HTTP server adapter. Put production TLS, caching, compression, error handling, and request timeouts at the server or reverse-proxy layer.

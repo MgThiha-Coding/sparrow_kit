@@ -29,14 +29,60 @@ class HeadMetadata {
     this.canonicalUrl,
     Iterable<MetaTag> metaTags = const [],
     Iterable<JsonLdSchema> jsonLd = const [],
+    this.openGraph,
+    this.twitterCard,
+    this.robots,
+    this.language = 'en',
+    this.locale,
   })  : metaTags = List<MetaTag>.unmodifiable(metaTags),
-        jsonLd = List<JsonLdSchema>.unmodifiable(jsonLd);
+        jsonLd = List<JsonLdSchema>.unmodifiable(jsonLd) {
+    if (language.trim().isEmpty) {
+      throw ArgumentError.value(language, 'language', 'Cannot be empty.');
+    }
+    if (locale != null && locale!.trim().isEmpty) {
+      throw ArgumentError.value(locale, 'locale', 'Cannot be empty.');
+    }
+  }
 
   final String title;
   final String? description;
   final String? canonicalUrl;
   final List<MetaTag> metaTags;
   final List<JsonLdSchema> jsonLd;
+  final OpenGraphMetadata? openGraph;
+  final TwitterCardMetadata? twitterCard;
+  final RobotsDirectives? robots;
+  final String language;
+  final String? locale;
+
+  List<MetaTag> get renderedMetaTags {
+    if (openGraph == null &&
+        twitterCard == null &&
+        robots == null &&
+        locale == null) {
+      return metaTags;
+    }
+
+    final tags = <String, MetaTag>{};
+    for (final tag in metaTags) {
+      tags[tag.id] = tag;
+    }
+    for (final tag in openGraph?.toMetaTags() ?? const <MetaTag>[]) {
+      tags[tag.id] = tag;
+    }
+    for (final tag in twitterCard?.toMetaTags() ?? const <MetaTag>[]) {
+      tags[tag.id] = tag;
+    }
+    if (robots != null) {
+      final tag = MetaTag.name('robots', robots!.toMetaContent());
+      tags[tag.id] = tag;
+    }
+    if (locale != null) {
+      final tag = MetaTag.property('og:locale', locale!);
+      tags[tag.id] = tag;
+    }
+    return List<MetaTag>.unmodifiable(tags.values);
+  }
 
   factory HeadMetadata.defaults({
     String title = 'SparrowKit Application',
@@ -83,6 +129,45 @@ class OpenGraphMetadata {
           MetaTag.property('og:description', description!),
         if (siteName != null) MetaTag.property('og:site_name', siteName!),
       ];
+}
+
+class RobotsDirectives {
+  const RobotsDirectives({
+    this.index = true,
+    this.follow = true,
+    this.archive = true,
+    this.snippets = true,
+    this.imageIndex = true,
+  });
+
+  final bool index;
+  final bool follow;
+  final bool archive;
+  final bool snippets;
+  final bool imageIndex;
+
+  RobotsDirectives copyWith({
+    bool? index,
+    bool? follow,
+    bool? archive,
+    bool? snippets,
+    bool? imageIndex,
+  }) =>
+      RobotsDirectives(
+        index: index ?? this.index,
+        follow: follow ?? this.follow,
+        archive: archive ?? this.archive,
+        snippets: snippets ?? this.snippets,
+        imageIndex: imageIndex ?? this.imageIndex,
+      );
+
+  String toMetaContent() => [
+        index ? 'index' : 'noindex',
+        follow ? 'follow' : 'nofollow',
+        if (!archive) 'noarchive',
+        if (!snippets) 'nosnippet',
+        if (!imageIndex) 'noimageindex',
+      ].join(', ');
 }
 
 class TwitterCardMetadata {

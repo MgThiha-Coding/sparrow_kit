@@ -34,9 +34,11 @@ class MarkupElement extends MarkupNode {
     Map<String, Object?> attributes = const {},
     Iterable<MarkupNode> children = const [],
     Map<String, MarkupEventHandler> events = const {},
+    Iterable<String> stylesheets = const [],
   })  : attributes = Map<String, Object?>.unmodifiable(attributes),
         children = _normalizeChildren(children),
-        events = Map<String, MarkupEventHandler>.unmodifiable(events) {
+        events = Map<String, MarkupEventHandler>.unmodifiable(events),
+        stylesheets = List<String>.unmodifiable(stylesheets) {
     if (!RegExp(r'^[A-Za-z][A-Za-z0-9-]*$').hasMatch(tag)) {
       throw ArgumentError.value(tag, 'tag', 'Invalid HTML tag name.');
     }
@@ -46,10 +48,38 @@ class MarkupElement extends MarkupNode {
   final Map<String, Object?> attributes;
   final List<MarkupNode> children;
   final Map<String, MarkupEventHandler> events;
+  final List<String> stylesheets;
 }
 
 abstract interface class SsrComponent {
   MarkupNode render();
+}
+
+List<String> collectMarkupStylesheets(MarkupNode root) {
+  final stylesheets = <String>{};
+
+  void visit(MarkupNode node) {
+    if (node is! MarkupElement) return;
+    stylesheets
+        .addAll(node.stylesheets.where((stylesheet) => stylesheet.isNotEmpty));
+    for (final child in node.children) {
+      visit(child);
+    }
+  }
+
+  visit(root);
+  return List<String>.unmodifiable(stylesheets);
+}
+
+String markupStylesheetId(String stylesheet) {
+  var firstHash = 17;
+  var secondHash = 29;
+  for (final codeUnit in stylesheet.codeUnits) {
+    firstHash = (firstHash * 31 + codeUnit) % 2147483647;
+    secondHash = (secondHash * 37 + codeUnit) % 2147483629;
+  }
+  return 'sparrow-responsive-${firstHash.toRadixString(36)}-'
+      '${secondHash.toRadixString(36)}';
 }
 
 List<MarkupNode> _normalizeChildren(Iterable<MarkupNode> children) {

@@ -5,6 +5,7 @@ import 'package:web/web.dart' as web;
 
 import '../../reactivity/signals.dart';
 import '../../rendering/dom_patcher.dart';
+import '../../rendering/dom_stylesheets.dart';
 import '../ssr/markup.dart';
 
 class HydrationState {
@@ -45,6 +46,7 @@ class HydrationEngine {
   }) {
     final cleanups = <void Function()>[];
     try {
+      cleanups.add(installMarkupStylesheets(tree));
       final nextNode =
           _hydrateNode(container.firstChild, tree, cleanups, 'root');
       if (nextNode != null) {

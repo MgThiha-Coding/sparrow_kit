@@ -85,6 +85,8 @@ HeadMetadata _documentMetadata() {
           ?.getAttribute('href')
           ?.trim() ??
       '';
+  final existingLanguage =
+      web.document.documentElement?.getAttribute('lang')?.trim() ?? '';
   final location = Uri.tryParse(web.window.location.href);
   final canonicalUrl = existingCanonical.isNotEmpty
       ? existingCanonical
@@ -97,6 +99,7 @@ HeadMetadata _documentMetadata() {
     title: defaults.title,
     description: defaults.description,
     canonicalUrl: canonicalUrl,
+    language: existingLanguage.isEmpty ? 'en' : existingLanguage,
     metaTags: [
       for (final tag in defaults.metaTags) _existingOrDefault(tag),
       if (canonicalUrl != null &&

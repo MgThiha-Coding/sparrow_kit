@@ -13,10 +13,13 @@ class StringRenderer {
   }) {
     final state = <String, Object?>{};
     final html = StringBuffer();
-
-    html.write('<!doctype html><html lang="en"><head>');
-    html.write('<meta charset="utf-8">');
+    final tree = component.render();
     final pageMetadata = metadata ?? HeadMetadata.defaults();
+
+    html.write(
+      '<!doctype html><html lang="${_escapeAttribute(pageMetadata.language)}"><head>',
+    );
+    html.write('<meta charset="utf-8">');
     html.write('<title>${_escapeText(pageMetadata.title)}</title>');
     if (pageMetadata.description != null) {
       html.write(
@@ -28,7 +31,7 @@ class StringRenderer {
         '<link rel="canonical" href="${_escapeAttribute(pageMetadata.canonicalUrl!)}">',
       );
     }
-    for (final tag in pageMetadata.metaTags) {
+    for (final tag in pageMetadata.renderedMetaTags) {
       html.write(
         '<meta ${tag.attribute}="${_escapeAttribute(tag.key)}" content="${_escapeAttribute(tag.content)}">',
       );
@@ -36,9 +39,10 @@ class StringRenderer {
     for (final schema in pageMetadata.jsonLd) {
       _writeJsonLd(html, schema);
     }
+    _writeStylesheets(html, tree);
 
     html.write('</head><body><div id="${_escapeAttribute(rootId)}">');
-    _writeNode(html, component.render(), state);
+    _writeNode(html, tree, state);
     html.write('</div>');
 
     final encodedState = jsonEncode(state).replaceAll('<', r'\u003C');
@@ -123,6 +127,22 @@ class StringRenderer {
   void _writeJsonLd(StringBuffer html, JsonLdSchema schema) {
     final json = jsonEncode(schema.toJsonLd()).replaceAll('<', r'\u003C');
     html.write('<script type="application/ld+json">$json</script>');
+  }
+
+  void _writeStylesheets(StringBuffer html, MarkupNode tree) {
+    for (final stylesheet in collectMarkupStylesheets(tree)) {
+      html.write(
+        '<style id="${markupStylesheetId(stylesheet)}" '
+        'data-sparrow-stylesheet>',
+      );
+      html.write(
+        stylesheet.replaceAll(
+          RegExp(r'</style', caseSensitive: false),
+          r'<\/style',
+        ),
+      );
+      html.write('</style>');
+    }
   }
 }
 

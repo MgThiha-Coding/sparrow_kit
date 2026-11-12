@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:sparrow_kit/server.dart';
 import 'package:web_app/app/pages/landing_page.dart';
 
@@ -8,7 +10,10 @@ Future<void> main(List<String> arguments) async {
     );
   }
 
-  await StaticSiteGenerator(clientScript: arguments[1]).generate(
+  await StaticSiteGenerator(
+    clientScript: arguments[1],
+    siteBaseUrl: Platform.environment['SPARROW_SITE_URL'],
+  ).generate(
     [
       StaticPage(
         path: '/',
