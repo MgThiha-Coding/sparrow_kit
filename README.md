@@ -12,98 +12,98 @@
   <a href="https://github.com/MgThiha-Coding/sparrow_kit"><img src="https://img.shields.io/badge/Web-DOM--native-2E8B57" alt="DOM-native web framework"></a>
 </p>
 
-<p align="center">Build semantic, server-rendered web experiences with Dart.</p>
+<p align="center">Build DOM-native, server-rendered web experiences with Dart.</p>
 
-Sparrow Kit is a lightweight, DOM-native Dart web framework with a UI syntax
-that feels familiar to Flutter developers. Describe interfaces with `Column`,
-`Row`, `Text`, `Container`, and `Button`; Sparrow Kit renders real HTML and CSS,
-not a Flutter canvas.
+Sparrow Kit is a web framework and build CLI for Dart developers who want
+semantic HTML, browser-native layout, and server-rendered content without
+shipping a Flutter rendering engine for their UI. Describe pages with familiar
+primitives like `Column`, `Row`, `Text`, and `Button`; Sparrow Kit renders real
+DOM rather than painting the interface to a canvas.
 
-The framework combines server-side rendering (SSR), browser hydration, and
-fine-grained `Signal<T>` reactivity. Search engines and visitors receive
-meaningful HTML in the initial response, while interactive updates patch the
-DOM directly.
+The framework brings server-side rendering (SSR), browser hydration, SEO
+metadata, and fine-grained `Signal<T>` reactivity into one workflow. The
+`sparrow_cli` scaffold creates the project wiring, and its build command
+orchestrates your configured server and browser entry points.
 
 ## Why Sparrow Kit?
 
-Flutter Web is designed to deliver a consistent, app-like Flutter experience
-in the browser. Sparrow Kit takes a document-first approach: it renders
-semantic HTML elements and lets the browser handle layout and painting. It
-does not ship Flutter's CanvasKit or Skwasm renderer for its UI.
+Flutter Web is a strong choice for app-like experiences that need Flutter's
+consistent rendering model. For content-rich websites, however, a
+canvas-oriented renderer can be a poor fit for document semantics, browser
+accessibility, initial HTML content, and search or social crawlers.
 
-That makes Sparrow Kit a good fit for content-rich sites and interactive Dart
-experiences where accessible markup, initial page content, and browser-native
-layout are important. It is not a transpiler for arbitrary Flutter widgets,
-and bundle size still depends on the application's code and dependencies.
+Sparrow Kit takes a document-first approach:
 
-## Features
+- **DOM-native UI:** components map to HTML elements and CSS layout, not
+  Flutter's CanvasKit or Skwasm renderer.
+- **Useful content before JavaScript:** SSR emits HTML for the browser to
+  display and crawlers to inspect.
+- **Interactive without replacing the page:** hydration attaches event
+  handlers and reactive bindings to the existing server-rendered DOM.
+- **Targeted updates:** `Text.bind()` patches its text node; it does not
+  rebuild neighboring nodes for a value change.
+- **CLI-driven builds:** a single build command checks the configured
+  entrypoints, generates SSR pages, copies web assets, and compiles the browser
+  bundle.
 
-- **Flutter-familiar primitives:** Build with `Column`, `Row`, `Text`,
-  `Container`, `Heading`, and `Button`.
-- **Semantic DOM output:** Layout primitives map to HTML elements and CSS
-  flexbox; headings and buttons remain native semantic elements.
-- **Fine-grained reactivity:** `Text.bind()` updates its text node without
-  rerendering the component or replacing neighboring DOM.
-- **SSR and hydration parity:** Use a shared platform-neutral UI description
-  to render HTML on the server and attach client-side effects and events
-  without replacing the initial page.
-- **SEO foundations:** Serve crawlable page content and metadata in the
-  initial HTML. Add accurate titles, descriptions, canonical URLs, and
-  structured data for each page.
-- **Dart-native tooling:** `sparrow_cli build web` validates entry points with
-  the Dart analyzer, runs your explicit SSR routes, and compiles the browser
-  entry point.
-- **Signals and lifecycle cleanup:** `Signal<T>` tracks only the effects that
-  read it; bindings and listeners are disposed with their owner.
+Sparrow Kit is not a Flutter widget transpiler. Its UI contract is a focused
+Dart API, not compatibility with arbitrary `package:flutter` widgets. It does
+not include Flutter's canvas renderer, but total JavaScript size and runtime
+performance still depend on your application, dependencies, and deployment.
 
-## Requirements
+## Get started
 
-- Dart SDK `>=3.6.0 <4.0.0`
-- A browser for DOM rendering and hydration
-- A Dart server runtime for SSR and static generation
+### 1. Install the CLI
 
-## Installation
-
-Add Sparrow Kit to your application's `pubspec.yaml`:
-
-```yaml
-dependencies:
-  sparrow_kit:
-    git:
-      url: https://github.com/MgThiha-Coding/sparrow_kit.git
-      path: packages/sparrow_kit
-      ref: main
-```
-
-Then resolve dependencies:
+The CLI is currently distributed from this Git repository:
 
 ```sh
+dart pub global activate --source git https://github.com/MgThiha-Coding/sparrow_kit.git --git-path packages/sparrow_cli
+```
+
+Ensure Dart's global executable directory is on your `PATH`. On Windows, this
+is typically `%LOCALAPPDATA%\Pub\Cache\bin`.
+
+### 2. Scaffold an app
+
+```sh
+sparrow init my_site
+cd my_site
 dart pub get
 ```
 
-## Quick start
+The scaffold creates the package dependencies, `sparrow.json`, a shared page
+under `lib/`, a hydration entrypoint under `web/`, and an SSR entrypoint under
+`server/`. It gives the CLI a working starting point rather than requiring you
+to wire package dependencies and build commands by hand.
 
-Add a mount point to `web/index.html`:
+For an existing Dart package, run `sparrow add web` from that package to add
+the Sparrow Kit web dependencies and starter files. Existing files are left
+unchanged.
 
-```html
-<div id="app"></div>
-<script defer src="main.dart.js"></script>
-```
+### 3. Build your page in `lib/`
 
-Define the platform-neutral UI tree in `lib/counter_page.dart`:
+The scaffolded `lib/home_page.dart` uses the same UI description for both SSR
+and hydration:
 
 ```dart
 import 'package:sparrow_kit/reactivity.dart';
 import 'package:sparrow_kit/ui.dart';
 
-UiNode counterPage(Signal<int> count) => Container(
+UiNode buildHomePage(Signal<int> count) => Container(
       padding: 24,
       child: Column(
         gap: 12,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Heading(1, 'Sparrow Kit counter'),
-          Text.bind('counter_count', count),
+          Heading(1, 'Welcome to Sparrow Kit'),
+          Row(
+            gap: 8,
+            children: [
+              const Text('Visits: '),
+              Text.bind('home_count', count),
+            ],
+          ),
           Button(
             label: 'Increment',
             onPressed: (_) => count.value++,
@@ -113,116 +113,83 @@ UiNode counterPage(Signal<int> count) => Container(
     );
 ```
 
-Then create the browser entry point in `web/main.dart`:
+`Text.bind` takes a stable ID so the server can serialize the initial signal
+value and the browser can restore it during hydration. A signal update patches
+the bound text node directly. The initial UI contract includes common layout
+and content primitives; it does not implicitly provide Flutter's full widget
+catalogue or dynamic, keyed child-list reconciliation.
 
-```dart
-import 'package:sparrow_kit/sparrow_kit.dart';
-import 'package:your_app/counter_page.dart';
+### 4. Run and build with the CLI
 
-final counter = component<void>((state, _) {
-  final count = state.use<int>(0);
-  return renderUi(counterPage(count));
-});
+From the app directory:
 
-void main() => runApp(counter(null));
+```sh
+sparrow dev
+sparrow build web
 ```
 
-`component()` provides component-scoped state through `state.use()`.
-`renderUi()` turns the platform-neutral UI description into DOM nodes and
-registers its effects and event listeners with the component's cleanup scope.
-`Text.bind()` gives the count its own reactive text binding, so clicking the
-button changes only that text node.
+`sparrow dev` builds the configured app and serves it with live reload.
+`sparrow build web` creates the production site in `build/web`, compiling the
+browser entrypoint with Dart's optimized JavaScript compiler.
 
-For browser-only pages that do not need the `component()` lifecycle, use
-`mountUi()` and keep its returned disposer:
+## What the CLI automates
 
-```dart
-final dispose = mountUi(
-  Column(children: [const Text('Hello from Sparrow Kit')]),
-);
-```
-
-## Server rendering and hydration
-
-The UI description is independent of browser APIs. Build it on the server
-inside a `UiPage`, then build the matching description in the browser with
-the serialized signal state. Keep `counterPage` in a shared library, such as
-`lib/counter_page.dart`, and import it in both entry points:
-
-```dart
-// Server entry point
-import 'package:sparrow_kit/server.dart';
-import 'package:your_app/counter_page.dart';
-
-final html = renderToString(
-  UiPage(() => counterPage(Signal<int>(0))),
-  clientScript: '/main.dart.js',
-);
-```
-
-```dart
-// Browser entry point
-import 'package:sparrow_kit/sparrow_kit.dart';
-import 'package:your_app/counter_page.dart';
-
-void main() => hydrateUiApp((state) {
-      final count = state.signal<int>('counter_count', fallback: 0);
-      return counterPage(count);
-    });
-```
-
-For static output, use `StaticSiteGenerator` from
-`package:sparrow_kit/server.dart`. Hydration checks the server markup and
-signal IDs before attaching events and reactive bindings. Keep the server and
-client component structure consistent.
-
-## Build with `sparrow_cli`
-
-Add the CLI as a development dependency. In the monorepo layout:
-
-```yaml
-dev_dependencies:
-  sparrow_cli:
-    git:
-      url: https://github.com/MgThiha-Coding/sparrow_kit.git
-      path: packages/sparrow_cli
-      ref: main
-```
-
-Create `sparrow.json` at the application root. The server entry point declares
-the static routes explicitly; the CLI does not infer routes or execute source
-code through analyzer:
+The generated `sparrow.json` connects the browser and server entrypoints:
 
 ```json
 {
   "web": {
     "client": "web/main.dart",
-    "server": "bin/site.dart",
+    "server": "server/site.dart",
     "output": "build/web",
     "clientOutput": "main.dart.js"
   }
 }
 ```
 
-Run the build from the application root:
+The scaffolded browser entrypoint calls `hydrateUiApp`; the server entrypoint
+uses `StaticSiteGenerator` to render the initial route from the shared page in
+`lib/`. When you run `sparrow build web`, the CLI:
 
-```sh
-dart run sparrow_cli build web
-```
+1. Analyzes the configured client and server entrypoints.
+2. Copies non-Dart assets from `web/` into the output directory.
+3. Runs the server entrypoint to generate the declared SSR routes and HTML.
+4. Compiles the client entrypoint with `dart compile js -O2`.
 
-The command analyzes the configured Dart entry points, copies non-Dart assets
-from `web/`, runs `bin/site.dart` to generate SSR routes, and compiles the
-browser entry point with `dart compile js`.
+This is build orchestration around your app code, not source-code discovery:
+the server entrypoint owns the route list, and you decide which pages and
+metadata to render. Add routes there as your site grows. The CLI does not
+translate Flutter widgets, infer routes from `lib/`, or replace `flutter build
+web`.
 
-## Compatibility boundary
+## SSR, hydration, and SEO
 
-Sparrow Kit's UI primitives are its own Dart-native API. They are **not**
-Flutter's `Widget` classes, and arbitrary Flutter widgets, render objects,
-plugins, and `package:flutter` applications are not automatically compatible.
-The initial layout contract uses CSS flexbox rather than Flutter's
-constraint-based layout engine. See the [UI contract and web build
-guide](docs/ui-contract-and-build.md) for the supported properties and
-an end-to-end example.
+The server renders page markup and serialized signal state into the initial
+HTML. In the browser, `hydrateUiApp` rebuilds the matching UI description from
+that state, checks it against the existing DOM, and attaches bindings and
+events without replacing the server markup. Keep the server and client UI
+structure and `Text.bind` IDs consistent.
+
+For page-specific SEO, pass `HeadMetadata` from the server route. Sparrow Kit
+can render titles, descriptions, canonical links, Open Graph and Twitter meta
+tags, and JSON-LD schemas into the initial response. The framework supplies
+the mechanisms; your app must provide accurate, page-specific values and
+public URLs. No framework can guarantee indexing, rankings, or rich-result
+eligibility across search engines.
+
+See the [SSR, hydration, and SEO guide](docs/ssr-and-seo.md) for metadata,
+structured-data, and request-time rendering examples.
+
+## Compatibility and requirements
+
+- Dart SDK `>=3.6.0 <4.0.0`
+- A modern browser for DOM rendering and hydration
+- A Dart runtime for SSR and static generation
+
+Sparrow Kit's `Text`, `Row`, `Column`, `Container`, `Heading`, and `Button` are
+Sparrow Kit APIs, not Flutter widgets. The initial layout contract uses CSS
+flexbox; Flutter render objects, custom painting, implicit Flutter themes, and
+Flutter package compatibility are outside its scope.
 
 ## Documentation
 
