@@ -128,6 +128,60 @@ void main() {
     'responsive layout CSS generation should be deterministic',
   );
 
+  final keyedItems = Signal<List<String>>(['a:Alpha', 'b:Beta']);
+  final keyedList = KeyedList<String>(
+    id: 'keyed_items',
+    items: keyedItems,
+    keyOf: (item) => item.split(':').first,
+    itemBuilder: (item) => Text(item.split(':').last),
+  );
+  final keyedHtml = renderToString(UiPage(() => keyedList));
+  for (final expected in [
+    '<ul><!--fw:children:keyed_items-->',
+    '<li data-sparrow-key="a"><span>Alpha</span></li>',
+    '<li data-sparrow-key="b"><span>Beta</span></li>',
+    '<!--fw:/children:keyed_items-->',
+    '"keyed_items":["a:Alpha","b:Beta"]',
+  ]) {
+    _expect(
+      keyedHtml.contains(expected),
+      'Keyed-list SSR should contain "$expected".',
+    );
+  }
+  final keyedMarkup = toMarkupNode(keyedList) as MarkupElement;
+  final keyedChildren = keyedMarkup.children.single as MarkupKeyedChildren;
+  keyedItems.value = ['b:Beta', 'a:Updated', 'c:Gamma'];
+  final updatedKeyedItems = keyedChildren.buildItems();
+  final updatedItemNode = updatedKeyedItems[1].node;
+  final updatedTextNode =
+      updatedItemNode is MarkupElement ? updatedItemNode.children.single : null;
+  _expect(
+    updatedKeyedItems.map((item) => item.key).join(',') == 'b,a,c' &&
+        updatedTextNode is MarkupText &&
+        updatedTextNode.value == 'Updated',
+    'Keyed-list updates should preserve item keys and rebuild updated content.',
+  );
+  keyedItems.value = ['duplicate:first', 'duplicate:second'];
+  _expectThrows(
+    keyedChildren.buildItems,
+    StateError,
+    'duplicate keys should be rejected on subsequent list updates',
+  );
+  _expectThrows(
+    () => renderToString(
+      UiPage(
+        () => KeyedList<String>(
+          id: 'duplicate_items',
+          items: Signal<List<String>>(['same:first', 'same:second']),
+          keyOf: (item) => item.split(':').first,
+          itemBuilder: (item) => Text(item),
+        ),
+      ),
+    ),
+    StateError,
+    'duplicate keys should be rejected during SSR',
+  );
+
   _expectThrows(
     () => Padding(child: const Text('invalid'), insets: const Insets.all(-1)),
     ArgumentError,

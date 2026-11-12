@@ -2,7 +2,7 @@ import 'dart:js_interop';
 
 import 'package:web/web.dart' as web;
 
-import '../reactivity/signals.dart' show Signal;
+import '../reactivity/signals.dart' show Signal, onCleanup;
 import 'component.dart';
 import 'dom_patcher.dart';
 
@@ -32,7 +32,9 @@ web.HTMLButtonElement createButton({
   _appendChild(button, child);
 
   if (onClick != null) {
-    button.addEventListener('click', ((web.Event _) => onClick()).toJS);
+    final listener = ((web.Event _) => onClick()).toJS;
+    button.addEventListener('click', listener);
+    onCleanup(() => button.removeEventListener('click', listener));
   }
 
   return button;
@@ -51,7 +53,7 @@ void _appendChild(web.Element parent, Object? child) {
   if (child is Signal<dynamic>) {
     final textNode = web.document.createTextNode('');
     parent.appendChild(textNode);
-    bindText(textNode, () => child.value);
+    onCleanup(bindText(textNode, () => child.value));
     return;
   }
 

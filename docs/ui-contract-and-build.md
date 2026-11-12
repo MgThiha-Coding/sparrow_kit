@@ -2,7 +2,7 @@
 
 ## Compatibility boundary
 
-The UI API in `package:sparrow_kit/ui.dart` is Sparrow Kit's Dart-native component model. It is not a Flutter renderer and does not accept arbitrary `package:flutter` widgets. Its first supported components are `Text`, `Heading`, `Row`, `Column`, `Container`, and `Button`.
+The UI API in `package:sparrow_kit/ui.dart` is Sparrow Kit's Dart-native component model. It is not a Flutter renderer and does not accept arbitrary `package:flutter` widgets. Its primitives include `Text`, `Heading`, `Row`, `Column`, `Container`, `Button`, `Padding`, `Margin`, `Expanded`, `Flexible`, `SizedBox`, `Stack`, `Positioned`, `Grid`, `Responsive`, and `KeyedList`.
 
 `Row` and `Column` lower to CSS flexbox. Their supported main-axis values are start, center, end, space-between, space-around, and space-evenly; cross-axis values are start, center, end, and stretch. `gap` is a non-negative pixel value. `Container` supports non-negative pixel width, height, padding, margin, and border radius, plus a static background color and ordinary attributes. Flutter constraints, render objects, custom painting, implicit Flutter themes, and Flutter package compatibility are out of scope.
 
@@ -39,7 +39,29 @@ UiNode counterPage(Signal<int> count) => Container(
 
 `Text.bind` requires a stable ID shared by SSR and hydration. IDs use letters, digits, and underscores, beginning with a letter or underscore. The server serializes the signal's initial value and places markers around its text. Hydration verifies those markers and the initial value before attaching the effect and event listeners. It does not replace the hydrated DOM.
 
-`mountUi()` renders a client-only UI tree and returns a disposer. Both direct mounting and hydration dispose bindings and event listeners when their disposer is called. A signal update patches the bound text node, not the component root. Structural changes are intentionally not implicit: this initial contract does not include conditionals, dynamic child lists, or keyed reconciliation.
+`mountUi()` renders a client-only UI tree and returns a disposer. Both direct mounting and hydration dispose bindings and event listeners when their disposer is called. A signal update patches the bound text node, not the component root. Conditional UI is explicit; `KeyedList<T>` provides the supported reactive collection primitive for adding, removing, updating, and reordering children.
+
+## Keyed child lists
+
+`KeyedList<T>` takes a `Signal<List<T>>`, a stable `keyOf` function, and an
+`itemBuilder`. Assign a new list to the signal to update the collection; mutating
+the current list in place does not notify subscribers. Keys must be unique and
+non-empty. Inserted items are rendered and hydrated, removed items have their
+bindings and event listeners disposed, and unchanged items retain their DOM
+nodes across reordering.
+
+The initial list value is serialized to JSON during SSR. Restore it with the
+same signal ID during hydration. For typed collections, provide `decode` to
+`HydrationState.signal<T>()` so JSON-decoded values are converted to the Dart
+type expected by the component:
+
+```dart
+final items = state.signal<List<String>>(
+  'products',
+  fallback: const [],
+  decode: (value) => (value! as List).cast<String>(),
+);
+```
 
 ## Responsive layouts
 

@@ -80,7 +80,7 @@ Run `dart run tool/reactivity_smoke.dart` from the monorepo root for a dependenc
 
 ## Component lifecycle and cleanup
 
-`Component<P>` owns a rendered root and its child components. `mount()` or `mountInto()` attaches it once. Override `onMount()`, `onUpdate()`, and `onDispose()` for lifecycle work; `createState<T>()` is a component-scoped convenience for a `Signal<T>`.
+`Component<P>` owns a rendered root and its child components. `mount()` or `mountInto()` attaches it once. Override `onMount()`, `onUpdate()`, and `onDispose()` for lifecycle work; `createState<T>()` is a component-scoped convenience for a `Signal<T>`. Updates render a candidate tree before replacing the committed root. If rendering fails, candidate children and render-scoped resources are disposed while the previous root remains mounted; a later signal change can retry the render. Successful updates replace the component root and dispose its previous nested components.
 
 Event listeners and reactive work created during a component render are registered in that render's cleanup scope. They are released when the render is replaced and when the component is disposed. `dispose()` also removes the component tree. Put resources that should live for the mounted component's lifetime in `onMount()` and explicitly release them in `onDispose()`; app- or feature-level resources should be released by their owning app or feature.
 
@@ -127,3 +127,5 @@ Use the class-based `Component<P>` directly when lifecycle overrides such as `on
 Hydration attaches client effects and event handlers to server-generated HTML without replacing that HTML. `HydrationEngine.hydrate()` checks the existing node, text, and initial attribute values against a `MarkupNode` tree. It throws on a mismatch and removes any bindings installed before the failure. Its returned disposer removes event listeners and reactive effects.
 
 For signals, the SSR renderer emits marker comments and a JSON state script. `hydrateApp()` reads that state, locates `#app`, attaches bindings, and initializes browser head metadata automatically. `runApp()` provides the matching client-rendered bootstrap. The client still supplies the page's markup builder and stable signal IDs; Sparrow Kit cannot infer application UI. See [SSR, hydration, and SEO](ssr-and-seo.md) for the full lifecycle.
+
+`KeyedList<T>` uses a `Signal<List<T>>`; assign a new list to update it. SSR renders keyed item wrappers, and hydration preserves unchanged keyed items, reorders existing nodes, replaces changed item content, and disposes removed items' event bindings. The list value is serialized as JSON. When restoring a typed collection or model, pass `decode` to `HydrationState.signal<T>()` to convert the decoded JSON value to the expected Dart type.

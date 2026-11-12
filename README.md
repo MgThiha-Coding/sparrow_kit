@@ -113,8 +113,9 @@ UiNode buildHomePage(Signal<int> count) => Container(
 
 `Text.bind` assigns a stable ID so SSR can serialize the initial signal value
 and hydration can restore it. The initial UI contract includes common layout
-and content primitives; it does not include Flutter's full widget catalogue
-or implicit keyed child-list reconciliation.
+and content primitives. `KeyedList<T>` supports signal-driven insertions,
+removals, updates, and reordering while preserving unchanged keyed DOM items.
+It does not include Flutter's full widget catalogue.
 
 ## The build workflow
 

@@ -28,6 +28,13 @@
         while (Date.now() - startedAt < 15000) {
           await new Promise((resolve) => setTimeout(resolve, 50));
           const frameDocument = frame.contentDocument;
+          if (frameDocument?.body?.dataset.testResult === 'failed') {
+            throw new Error(
+              `${testCase.width}px: `
+              + (frameDocument.body.dataset.testError
+                || 'browser smoke failed without an error message'),
+            );
+          }
           if (frameDocument?.body?.dataset.testResult !== 'passed') continue;
 
           const root = frameDocument.querySelector('#app > section');

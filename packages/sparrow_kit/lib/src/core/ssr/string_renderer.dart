@@ -71,6 +71,22 @@ class StringRenderer {
         html.write('<!--fw:text:$id-->');
         html.write(_escapeText(_textValue(signal.value)));
         html.write('<!--fw:/text:$id-->');
+      case MarkupKeyedChildren(
+          :final id,
+          :final itemTag,
+          :final initialItems,
+          :final source,
+        ):
+        _collectState(state, id, source.value);
+        html.write('<!--fw:children:$id-->');
+        for (final item in initialItems) {
+          html.write(
+            '<$itemTag data-sparrow-key="${_escapeAttribute(item.key)}">',
+          );
+          _writeNode(html, item.node, state);
+          html.write('</$itemTag>');
+        }
+        html.write('<!--fw:/children:$id-->');
       case MarkupElement(
           :final tag,
           :final attributes,

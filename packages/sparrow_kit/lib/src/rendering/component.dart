@@ -82,14 +82,16 @@ abstract class Component<P> {
   }
 
   void _renderAndCommit() {
-    _disposeRenderedContent();
-    _renderDisposers = [];
-    _childrenBeingRendered = [];
-
+    final previousDisposers = _renderDisposers;
+    final previousChildren = _renderedChildren;
+    final previousPendingChildren = _childrenBeingRendered;
+    final nextDisposers = <void Function()>[];
+    final nextChildren = <Component<dynamic>>[];
+    _childrenBeingRendered = nextChildren;
     late final web.Node nextRoot;
     try {
       nextRoot = ReactiveContext.runInEffectScope(
-        _renderDisposers,
+        nextDisposers,
         () {
           _renderStack.add(this);
           try {
@@ -101,32 +103,51 @@ abstract class Component<P> {
         },
       );
     } catch (_) {
-      for (final child in _childrenBeingRendered.reversed) {
+      _childrenBeingRendered = previousPendingChildren;
+      for (final child in nextChildren.reversed) {
         child.dispose();
       }
-      _childrenBeingRendered = [];
-      for (final disposer in _renderDisposers.reversed) {
+      for (final disposer in nextDisposers.reversed) {
         disposer();
       }
-      _renderDisposers = [];
       rethrow;
     }
 
     final previousRoot = _rootNode;
-    if (previousRoot == null) {
-      _host!.appendChild(nextRoot);
-    } else {
-      final parent = previousRoot.parentNode;
-      if (parent == null) {
+    try {
+      if (previousRoot == null) {
         _host!.appendChild(nextRoot);
       } else {
-        parent.replaceChild(nextRoot, previousRoot);
+        final parent = previousRoot.parentNode;
+        if (!identical(nextRoot, previousRoot)) {
+          if (parent == null) {
+            _host!.appendChild(nextRoot);
+          } else {
+            parent.replaceChild(nextRoot, previousRoot);
+          }
+        }
       }
+    } catch (_) {
+      _childrenBeingRendered = previousPendingChildren;
+      for (final child in nextChildren.reversed) {
+        child.dispose();
+      }
+      for (final disposer in nextDisposers.reversed) {
+        disposer();
+      }
+      rethrow;
     }
+
+    for (final child in previousChildren.reversed) {
+      child.dispose();
+    }
+    for (final disposer in previousDisposers.reversed) {
+      disposer();
+    }
+
     _rootNode = nextRoot;
-    _renderedChildren = List<Component<dynamic>>.of(
-      _childrenBeingRendered,
-    );
+    _renderDisposers = nextDisposers;
+    _renderedChildren = nextChildren;
 
     if (_isActive) {
       ReactiveContext.untracked(onUpdate);

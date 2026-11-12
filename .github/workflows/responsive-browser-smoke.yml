@@ -1,4 +1,4 @@
-name: Responsive browser smoke
+name: Sparrow Kit CI
 
 on:
   pull_request:
@@ -6,9 +6,13 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
 jobs:
-  browser-smoke:
+  verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -22,28 +26,69 @@ jobs:
       - name: Fetch Dart workspace dependencies
         run: dart pub get
 
+      - name: Analyze workspace
+        run: dart analyze
+
+      - name: Run workspace smoke tests
+        run: |
+          dart run tool/reactivity_smoke.dart
+          dart run tool/ui_contract_smoke.dart
+          dart run tool/ssr_defaults_smoke.dart
+          dart run tool/sparrow_cli_build_smoke.dart
+          dart run tool/seo_smoke.dart
+          dart run tool/router_smoke.dart
+          dart run tool/portfolio_store_smoke.dart
+
       - name: Compile browser smoke fixture
         run: >-
           dart compile js tool/ui_contract_browser_smoke.dart
           -O2 -o tool/ui_contract_browser_smoke.dart.js
 
-      - name: Run viewport and hydration checks in Chrome
+      - name: Run responsive and hydration checks in Chrome
         env:
           CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+        shell: bash
         run: |
-          python3 -m http.server 8765 --bind 127.0.0.1 \
-            > "$RUNNER_TEMP/sparrow-http.log" 2>&1 &
-          server_pid=$!
-          trap 'kill "$server_pid"' EXIT
+          set -Eeuo pipefail
 
+          server_log="$RUNNER_TEMP/sparrow-http.log"
+          result_file="$RUNNER_TEMP/sparrow-responsive-browser-result.html"
+          python3 -m http.server 8765 --bind 127.0.0.1 >"$server_log" 2>&1 &
+          server_pid=$!
+          cleanup() {
+            kill "$server_pid" 2>/dev/null || true
+            wait "$server_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          ready=0
           for attempt in $(seq 1 30); do
-            if curl --fail --silent http://127.0.0.1:8765/tool/ui_contract_responsive_ci.html > /dev/null; then
+            if ! kill -0 "$server_pid" 2>/dev/null; then
+              echo "Local HTTP server exited before becoming ready."
+              cat "$server_log"
+              exit 1
+            fi
+            if curl --fail --silent --output /dev/null \
+              http://127.0.0.1:8765/tool/ui_contract_responsive_ci.html; then
+              ready=1
               break
             fi
             sleep 1
           done
 
-          "$CHROME_PATH" \
+          if [[ "$ready" != 1 ]]; then
+            echo "Local HTTP server did not become ready within 30 seconds."
+            cat "$server_log"
+            exit 1
+          fi
+          if ! curl --fail --silent --output /dev/null \
+            http://127.0.0.1:8765/tool/ui_contract_browser_smoke.dart.js; then
+            echo "Compiled browser fixture is not available from the HTTP server."
+            cat "$server_log"
+            exit 1
+          fi
+
+          if ! "$CHROME_PATH" \
             --headless \
             --no-sandbox \
             --disable-gpu \
@@ -51,8 +96,22 @@ jobs:
             --virtual-time-budget=60000 \
             --dump-dom \
             http://127.0.0.1:8765/tool/ui_contract_responsive_ci.html \
-            > "$RUNNER_TEMP/sparrow-responsive-browser-result.html"
+            >"$result_file" 2>&1; then
+            echo "Chrome failed while running the responsive browser harness."
+            cat "$result_file"
+            cat "$server_log"
+            exit 1
+          fi
 
-          cat "$RUNNER_TEMP/sparrow-responsive-browser-result.html"
-          grep -q 'data-ci-status="passed"' \
-            "$RUNNER_TEMP/sparrow-responsive-browser-result.html"
+          cat "$result_file"
+          if ! grep --fixed-strings --quiet 'data-ci-status="passed"' "$result_file"; then
+            echo "Browser harness did not report success."
+            cat "$server_log"
+            exit 1
+          fi
+          for width in 375 768 1440; do
+            if ! grep --fixed-strings --quiet "\"viewport\":$width" "$result_file"; then
+              echo "Browser harness output is missing the ${width}px viewport result."
+              exit 1
+            fi
+          done

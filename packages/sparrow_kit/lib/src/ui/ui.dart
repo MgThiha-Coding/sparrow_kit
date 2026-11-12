@@ -85,6 +85,31 @@ class Column extends UiNode {
   final Map<String, Object?> attributes;
 }
 
+class KeyedList<T> extends UiNode {
+  KeyedList({
+    required this.id,
+    required this.items,
+    required String Function(T item) keyOf,
+    required UiNode Function(T item) itemBuilder,
+    this.tag = 'ul',
+    this.itemTag = 'li',
+    this.attributes = const {},
+  })  : keyOf = keyOf,
+        itemBuilder = itemBuilder,
+        _keyOf = _eraseKeyFunction(keyOf),
+        _itemBuilder = _eraseItemBuilder(itemBuilder);
+
+  final String id;
+  final Signal<List<T>> items;
+  final String Function(T item) keyOf;
+  final UiNode Function(T item) itemBuilder;
+  final String Function(Object? item) _keyOf;
+  final UiNode Function(Object? item) _itemBuilder;
+  final String tag;
+  final String itemTag;
+  final Map<String, Object?> attributes;
+}
+
 class Container extends UiNode {
   Container({
     required this.child,
@@ -553,6 +578,37 @@ class _UiNodeConverter {
           children: children.map(
             (child) => convert(child, parent: _UiChildContext.flex),
           ),
+        ),
+      KeyedList(
+        :final id,
+        :final items,
+        :final _keyOf,
+        :final _itemBuilder,
+        :final tag,
+        :final itemTag,
+        :final attributes,
+      ) =>
+        MarkupElement(
+          tag,
+          attributes: attributes,
+          children: [
+            MarkupKeyedChildren(
+              id: id,
+              itemTag: itemTag,
+              source: items,
+              stylesheetProvider: () => stylesheet,
+              buildItems: () => [
+                for (final item in items.value)
+                  MarkupKeyedItem(
+                    _keyOf(item),
+                    convert(
+                      _itemBuilder(item),
+                      parent: _UiChildContext.ordinary,
+                    ),
+                  ),
+              ],
+            ),
+          ],
         ),
       Container(
         :final child,
@@ -1284,6 +1340,14 @@ void _validateFinite(double? value, String name) {
     throw ArgumentError.value(value, name, 'Must be a finite CSS length.');
   }
 }
+
+String Function(Object?) _eraseKeyFunction<T>(String Function(T) callback) =>
+    (Object? item) => callback(item as T);
+
+UiNode Function(Object?) _eraseItemBuilder<T>(
+  UiNode Function(T) callback,
+) =>
+    (Object? item) => callback(item as T);
 
 void _validateNonNegative(double? value, String name) {
   _validateFinite(value, name);

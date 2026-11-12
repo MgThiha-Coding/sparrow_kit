@@ -1,7 +1,114 @@
+import 'dart:async';
+
 import 'package:sparrow_kit/sparrow_kit.dart';
 import 'package:web/web.dart' as web;
 
+var _keyedButtonClicks = 0;
+final MarkupEventHandler _keyedButtonHandler = _recordKeyedButtonClick;
+
+void _recordKeyedButtonClick(Object? _) {
+  _keyedButtonClicks++;
+}
+
+class _LifecycleCounters {
+  int parentMounts = 0;
+  int parentUpdates = 0;
+  int parentDisposals = 0;
+  int childMounts = 0;
+  int childDisposals = 0;
+  int clicks = 0;
+}
+
+class _NestedLifecycleComponent extends Component<void> {
+  _NestedLifecycleComponent(this.counters) : super(null);
+
+  final _LifecycleCounters counters;
+
+  @override
+  web.Node render() => createButton(
+        child: 'Nested',
+        onClick: () => counters.clicks++,
+      );
+
+  @override
+  void onMount() {
+    counters.childMounts++;
+  }
+
+  @override
+  void onDispose() {
+    counters.childDisposals++;
+  }
+}
+
+class _LifecycleParentComponent extends Component<int> {
+  _LifecycleParentComponent(this.value, this.counters) : super(0);
+
+  final Signal<int> value;
+  final _LifecycleCounters counters;
+
+  @override
+  web.Node render() {
+    final current = value.value;
+    return createElement(
+      'div',
+      children: [
+        createButton(child: 'Parent $current'),
+        _NestedLifecycleComponent(counters),
+      ],
+    );
+  }
+
+  @override
+  void onMount() {
+    counters.parentMounts++;
+  }
+
+  @override
+  void onUpdate() {
+    counters.parentUpdates++;
+  }
+
+  @override
+  void onDispose() {
+    counters.parentDisposals++;
+  }
+}
+
+class _TransactionalComponent extends Component<void> {
+  _TransactionalComponent(this.value) : super(null);
+
+  final Signal<int> value;
+  int clicks = 0;
+  int disposals = 0;
+
+  @override
+  web.Node render() {
+    final current = value.value;
+    if (current < 0) throw StateError('Render rejected.');
+    return createButton(
+      child: 'State $current',
+      onClick: () => clicks++,
+    );
+  }
+
+  @override
+  void onDispose() {
+    disposals++;
+  }
+}
+
 Future<void> main() async {
+  try {
+    await _runSmoke();
+  } catch (error) {
+    web.document.body?.setAttribute('data-test-error', error.toString());
+    web.document.body?.setAttribute('data-test-result', 'failed');
+    rethrow;
+  }
+}
+
+Future<void> _runSmoke() async {
   final app = web.document.getElementById('app');
   final direct = web.document.getElementById('direct');
   final componentHost = web.document.getElementById('component');
@@ -10,7 +117,12 @@ Future<void> main() async {
   }
 
   final serverHtml = renderToString(
-    UiPage(() => _responsivePage(Signal<int>(3))),
+    UiPage(
+      () => _responsivePage(
+        Signal<int>(3),
+        Signal<List<String>>(['a:Alpha', 'b:Beta']),
+      ),
+    ),
     metadata: HeadMetadata(
       title: 'Responsive hydration test',
       language: 'fr-CA',
@@ -46,12 +158,46 @@ Future<void> main() async {
     'responsive SSR stylesheet was not installed',
   );
 
+  final mismatchHost = web.document.createElement('div');
+  mismatchHost.appendChild(serverMarkup.cloneNode(true));
+  web.document.body!.appendChild(mismatchHost);
+  mismatchHost
+      .querySelector('ul [data-sparrow-key]')!
+      .setAttribute('data-sparrow-key', 'wrong');
+  Object? mismatchError;
+  try {
+    HydrationEngine().hydrate(
+      container: mismatchHost,
+      tree: toMarkupNode(
+        _responsivePage(
+          Signal<int>(3),
+          Signal<List<String>>(['a:Alpha', 'b:Beta']),
+        ),
+      ),
+    );
+  } on StateError catch (error) {
+    mismatchError = error;
+  } finally {
+    mismatchHost.remove();
+  }
+  _expect(
+    mismatchError.toString().contains('Keyed child "a" mismatch'),
+    'keyed hydration mismatch diagnostics were not reported',
+  );
+
   final hydratedRoot = app.firstChild;
   late Signal<int> hydratedCount;
+  late Signal<List<String>> hydratedItems;
   final hydrated = hydrateUiApp((state) {
     final count = state.signal<int>('count', fallback: 0);
+    final items = state.signal<List<String>>(
+      'keyed_items',
+      fallback: ['a:Alpha', 'b:Beta'],
+      decode: (value) => (value! as List).cast<String>(),
+    );
     hydratedCount = count;
-    return _responsivePage(count);
+    hydratedItems = items;
+    return _responsivePage(count, items);
   });
   _expect(
     web.document.documentElement?.getAttribute('lang') == 'fr-CA',
@@ -62,6 +208,50 @@ Future<void> main() async {
     'hydration replaced its root',
   );
   _expect(app.textContent?.contains('3') ?? false, 'initial text mismatch');
+
+  final keyedList = app.querySelector('ul')!;
+  final keyedA = keyedList.querySelector('[data-sparrow-key="a"]')!;
+  final keyedB = keyedList.querySelector('[data-sparrow-key="b"]')!;
+  final keyedAButton = keyedA.querySelector('button')! as web.HTMLButtonElement;
+  final keyedBButton = keyedB.querySelector('button')! as web.HTMLButtonElement;
+  _keyedButtonClicks = 0;
+  hydratedItems.value = ['b:Beta', 'a:Updated', 'c:Gamma'];
+  await Future<void>.delayed(Duration.zero);
+  final keyedChildren = keyedList.querySelectorAll('[data-sparrow-key]');
+  _expect(
+    keyedChildren.length == 3 &&
+        (keyedChildren.item(0) as web.Element?)
+                ?.getAttribute('data-sparrow-key') ==
+            'b' &&
+        (keyedChildren.item(1) as web.Element?)
+                ?.getAttribute('data-sparrow-key') ==
+            'a' &&
+        (keyedChildren.item(2) as web.Element?)
+                ?.getAttribute('data-sparrow-key') ==
+            'c',
+    'keyed children did not insert and reorder correctly',
+  );
+  _expect(
+    identical(keyedB, keyedList.querySelector('[data-sparrow-key="b"]')) &&
+        identical(
+          keyedBButton,
+          keyedList.querySelector('[data-sparrow-key="b"] button'),
+        ) &&
+        identical(keyedA, keyedList.querySelector('[data-sparrow-key="a"]')) &&
+        keyedList.querySelector('[data-sparrow-key="a"]')?.textContent ==
+            'Updated',
+    'keyed reconciliation replaced stable items or missed an update',
+  );
+  keyedAButton.click();
+  _expect(_keyedButtonClicks == 0, 'updated keyed item kept a stale listener');
+  keyedBButton.click();
+  _expect(_keyedButtonClicks == 1, 'reordered keyed event listener was lost');
+
+  hydratedItems.value = ['c:Gamma'];
+  await Future<void>.delayed(Duration.zero);
+  keyedAButton.click();
+  keyedBButton.click();
+  _expect(_keyedButtonClicks == 1, 'removed keyed items kept event listeners');
 
   (app.querySelector('button')! as web.HTMLButtonElement).click();
   await Future<void>.delayed(Duration.zero);
@@ -74,6 +264,8 @@ Future<void> main() async {
   (app.querySelector('button')! as web.HTMLButtonElement).click();
   await Future<void>.delayed(Duration.zero);
   _expect(hydratedCount.value == 4, 'disposed handler still ran');
+  (keyedList.querySelector('button') as web.HTMLButtonElement?)?.click();
+  _expect(_keyedButtonClicks == 1, 'disposed keyed list still handled events');
 
   final count = Signal<int>(1);
   final stylesheetCountBeforeDirect = web.document.head!
@@ -153,6 +345,85 @@ Future<void> main() async {
   await Future<void>.delayed(Duration.zero);
   _expect(componentCount.value == 2, 'disposed component handler still ran');
 
+  final lifecycleCounters = _LifecycleCounters();
+  final lifecycleSignal = Signal<int>(0);
+  final lifecycleParent =
+      _LifecycleParentComponent(lifecycleSignal, lifecycleCounters);
+  lifecycleParent.mountInto(componentHost);
+  final originalNestedButton = componentHost.querySelectorAll('button').item(1)!
+      as web.HTMLButtonElement;
+  _expect(
+    lifecycleCounters.parentMounts == 1 && lifecycleCounters.childMounts == 1,
+    'nested component mount lifecycle did not run once',
+  );
+  lifecycleSignal.value = 1;
+  await Future<void>.delayed(Duration.zero);
+  final updatedNestedButton = componentHost.querySelectorAll('button').item(1)!
+      as web.HTMLButtonElement;
+  _expect(
+    lifecycleCounters.parentUpdates == 1 &&
+        lifecycleCounters.childMounts == 2 &&
+        lifecycleCounters.childDisposals == 1,
+    'nested component update did not dispose and remount predictably',
+  );
+  originalNestedButton.click();
+  updatedNestedButton.click();
+  _expect(
+    lifecycleCounters.clicks == 1,
+    'nested event listeners were not cleaned up on component update',
+  );
+  lifecycleParent.dispose();
+  updatedNestedButton.click();
+  lifecycleSignal.value = 2;
+  await Future<void>.delayed(Duration.zero);
+  _expect(
+    lifecycleCounters.parentDisposals == 1 &&
+        lifecycleCounters.childDisposals == 2 &&
+        lifecycleCounters.parentUpdates == 1 &&
+        lifecycleCounters.clicks == 1,
+    'disposed components remained reactive or retained event listeners',
+  );
+
+  final transactionalState = Signal<int>(0);
+  final transactionalComponent = _TransactionalComponent(transactionalState);
+  transactionalComponent.mountInto(componentHost);
+  final transactionalRoot = componentHost.firstChild;
+  final transactionalButton =
+      componentHost.querySelector('button')! as web.HTMLButtonElement;
+  Object? renderError;
+  runZonedGuarded(
+    () => transactionalState.value = -1,
+    (error, _) => renderError = error,
+  );
+  await Future<void>.delayed(Duration.zero);
+  _expect(renderError is StateError, 'component render failure was hidden');
+  _expect(
+    identical(componentHost.firstChild, transactionalRoot),
+    'failed component update replaced the committed root',
+  );
+  transactionalButton.click();
+  _expect(
+    transactionalComponent.clicks == 1,
+    'failed component update disposed the committed event listener',
+  );
+  transactionalState.value = 1;
+  await Future<void>.delayed(Duration.zero);
+  _expect(
+    componentHost.textContent == 'State 1' &&
+        !identical(componentHost.firstChild, transactionalRoot),
+    'component did not recover after a failed render',
+  );
+  transactionalButton.click();
+  _expect(
+    transactionalComponent.clicks == 1,
+    'successful update retained the previous event listener',
+  );
+  transactionalComponent.dispose();
+  _expect(
+    transactionalComponent.disposals == 1,
+    'component dispose lifecycle did not run exactly once',
+  );
+
   final disposeResponsiveDom = mountUi(
     Padding(
       attributes: const {'data-test-layout': 'client-padding'},
@@ -176,6 +447,41 @@ Future<void> main() async {
     desktop: '6px',
   );
   disposeResponsiveDom();
+
+  final directItems = Signal<List<String>>(['x:One', 'y:Two']);
+  final disposeKeyedDirect = mountUi(
+    KeyedList<String>(
+      id: 'direct_items',
+      items: directItems,
+      keyOf: (item) => item.split(':').first,
+      itemBuilder: (item) => Text(item.split(':').last),
+    ),
+    rootSelector: '#direct',
+  );
+  final directList = direct.querySelector('ul')!;
+  final directX = directList.querySelector('[data-sparrow-key="x"]')!;
+  directItems.value = ['y:Two', 'x:Updated', 'z:Three'];
+  await Future<void>.delayed(Duration.zero);
+  final directKeyedChildren = directList.querySelectorAll('[data-sparrow-key]');
+  _expect(
+    directKeyedChildren.length == 3 &&
+        (directKeyedChildren.item(0) as web.Element?)
+                ?.getAttribute('data-sparrow-key') ==
+            'y' &&
+        identical(
+            directX, directList.querySelector('[data-sparrow-key="x"]')) &&
+        directList.querySelector('[data-sparrow-key="x"]')?.textContent ==
+            'Updated',
+    'direct DOM keyed reconciliation failed',
+  );
+  disposeKeyedDirect();
+  directItems.value = ['x:After dispose'];
+  await Future<void>.delayed(Duration.zero);
+  _expect(
+    directList.querySelector('[data-sparrow-key="x"]')?.textContent ==
+        'Updated',
+    'disposed direct keyed list kept reacting to signals',
+  );
 
   final stylesheetCountBeforeSharedMounts = web.document.head!
       .querySelectorAll('style[data-sparrow-stylesheet]')
@@ -285,7 +591,11 @@ void _expect(bool condition, String message) {
   if (!condition) throw StateError(message);
 }
 
-UiNode _responsivePage(Signal<int> count) => Responsive(
+UiNode _responsivePage(
+  Signal<int> count,
+  Signal<List<String>> items,
+) =>
+    Responsive(
       tag: 'section',
       layouts: {
         ResponsiveBreakpoint.mobile: ResponsiveFlexLayout(
@@ -380,6 +690,15 @@ UiNode _responsivePage(Signal<int> count) => Responsive(
             Text('grid three'),
             Text('grid four'),
           ],
+        ),
+        KeyedList<String>(
+          id: 'keyed_items',
+          items: items,
+          keyOf: (item) => item.split(':').first,
+          itemBuilder: (item) => Button(
+            label: item.split(':').last,
+            onPressed: _keyedButtonHandler,
+          ),
         ),
       ],
     );

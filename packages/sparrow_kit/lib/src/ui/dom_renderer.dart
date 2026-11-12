@@ -3,11 +3,13 @@ import 'dart:js_interop';
 import 'package:web/web.dart' as web;
 
 import '../api/component.dart' show ComponentState, component;
+import '../core/hydration/hydration_engine.dart';
 import '../core/ssr/markup.dart';
-import '../reactivity/signals.dart' show Signal, onCleanup;
+import '../reactivity/signals.dart' show Signal, effect, onCleanup;
 import '../rendering/component.dart' as runtime;
 import '../rendering/dom_patcher.dart';
 import '../rendering/dom_stylesheets.dart';
+import '../rendering/markup_dom_fragment.dart';
 import 'ui.dart';
 
 class DomUiRenderer {
@@ -54,6 +56,7 @@ class DomUiRenderer {
     return switch (node) {
       MarkupText(:final value) => web.document.createTextNode(value),
       SignalText(:final signal) => _renderSignalText(signal),
+      MarkupKeyedChildren keyedChildren => _renderKeyedChildren(keyedChildren),
       MarkupElement(
         :final tag,
         :final attributes,
@@ -62,6 +65,113 @@ class DomUiRenderer {
       ) =>
         _renderElement(tag, attributes, children, events),
     };
+  }
+
+  web.Node _renderKeyedChildren(MarkupKeyedChildren template) {
+    final fragment = web.document.createDocumentFragment();
+    final startMarker =
+        web.document.createComment('fw:children:${template.id}');
+    final endMarker = web.document.createComment('fw:/children:${template.id}');
+    fragment
+      ..appendChild(startMarker)
+      ..appendChild(endMarker);
+    final mountedItems = <String, _RenderedKeyedItem>{};
+    var installedStylesheet = template.stylesheet;
+    void Function()? disposeDynamicStylesheet;
+
+    void reconcile() {
+      final desiredItems = template.buildItems();
+      final stylesheet = template.stylesheet;
+      if (stylesheet != installedStylesheet) {
+        disposeDynamicStylesheet?.call();
+        disposeDynamicStylesheet = stylesheet == null || stylesheet.isEmpty
+            ? null
+            : installMarkupStylesheets(
+                MarkupElement('div', stylesheets: [stylesheet]),
+              );
+        installedStylesheet = stylesheet;
+      }
+      final desiredKeys = {for (final item in desiredItems) item.key};
+      final parent = endMarker.parentNode;
+      if (parent == null) {
+        throw StateError('Keyed children were detached before rendering.');
+      }
+
+      for (final key in mountedItems.keys.toList()) {
+        if (desiredKeys.contains(key)) continue;
+        final removed = mountedItems.remove(key)!;
+        removed.dispose();
+        removed.element.remove();
+      }
+
+      for (final item in desiredItems) {
+        var mounted = mountedItems[item.key];
+        if (mounted == null) {
+          mounted = _createKeyedItem(template, item);
+          mountedItems[item.key] = mounted;
+        } else if (!markupNodeEquals(mounted.node, item.node)) {
+          final replacement = _createKeyedItem(template, item);
+          mounted.dispose();
+          while (mounted.element.firstChild != null) {
+            mounted.element.removeChild(mounted.element.firstChild!);
+          }
+          while (replacement.element.firstChild != null) {
+            mounted.element.appendChild(replacement.element.firstChild!);
+          }
+          mounted
+            ..node = item.node
+            ..dispose = replacement.dispose;
+        }
+      }
+
+      web.Node nextNode = endMarker;
+      for (final item in desiredItems.reversed) {
+        final element = mountedItems[item.key]!.element;
+        if (!identical(element.nextSibling, nextNode)) {
+          parent.insertBefore(element, nextNode);
+        }
+        nextNode = element;
+      }
+    }
+
+    void disposeItems() {
+      for (final item in mountedItems.values.toList().reversed) {
+        item.dispose();
+      }
+      mountedItems.clear();
+    }
+
+    late final void Function() disposeEffect;
+    try {
+      disposeEffect = effect(reconcile);
+    } catch (_) {
+      disposeItems();
+      rethrow;
+    }
+    _cleanups.add(() {
+      disposeEffect();
+      disposeDynamicStylesheet?.call();
+      disposeItems();
+    });
+    return fragment;
+  }
+
+  _RenderedKeyedItem _createKeyedItem(
+    MarkupKeyedChildren template,
+    MarkupKeyedItem item,
+  ) {
+    final element = web.document.createElement(template.itemTag);
+    element.setAttribute('data-sparrow-key', item.key);
+    appendMarkupDomFragment(item.node, element);
+    final dispose = HydrationEngine().hydrate(
+      container: element,
+      tree: item.node,
+    );
+    return _RenderedKeyedItem(
+      element: element,
+      node: item.node,
+      dispose: dispose,
+    );
   }
 
   web.Node _renderSignalText(Signal<dynamic> signal) {
@@ -114,6 +224,18 @@ class DomUiRenderer {
 
     return element;
   }
+}
+
+class _RenderedKeyedItem {
+  _RenderedKeyedItem({
+    required this.element,
+    required this.node,
+    required this.dispose,
+  });
+
+  final web.Element element;
+  MarkupNode node;
+  void Function() dispose;
 }
 
 typedef UiComponentBuilder<P> = UiNode Function(
