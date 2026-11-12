@@ -121,7 +121,7 @@ catalogue or dynamic, keyed child-list reconciliation.
 
 ### 4. Run and build with the CLI
 
-From the app directory:
+From a scaffolded app directory:
 
 ```sh
 sparrow dev
@@ -130,17 +130,21 @@ sparrow build web
 
 `sparrow dev` builds the configured app and serves it with live reload.
 `sparrow build web` creates the production site in `build/web`, compiling the
-browser entrypoint with Dart's optimized JavaScript compiler. To build this
-repository's company landing page, run the command from its configured app:
+browser entrypoint with Dart's optimized JavaScript compiler.
+
+To build this repository's company landing page, resolve workspace
+dependencies from the repository root, then run the CLI from the app directory:
 
 ```sh
+dart pub get
 cd apps/web_app
 dart run sparrow_cli build web
 ```
 
 ## What the CLI automates
 
-The generated `sparrow.json` connects the browser and server entrypoints:
+Each app's `sparrow.json` connects its browser and server entrypoints. A
+scaffolded app starts with:
 
 ```json
 {
@@ -153,9 +157,12 @@ The generated `sparrow.json` connects the browser and server entrypoints:
 }
 ```
 
-The scaffolded browser entrypoint calls `hydrateUiApp`; the server entrypoint
-uses `StaticSiteGenerator` to render the initial route from the shared page in
-`lib/`. When you run `sparrow build web`, the CLI:
+The repository landing page has its own checked-in configuration in
+[`apps/web_app/sparrow.json`](apps/web_app/sparrow.json): it uses
+`web/main.dart` for hydration and `bin/site.dart` to render the landing page
+from the shared description in `lib/`.
+
+When you run `sparrow build web`, the CLI:
 
 1. Analyzes the configured client and server entrypoints.
 2. Clears the target output directory and copies non-Dart assets from `web/`.
@@ -171,10 +178,11 @@ web`.
 ## SSR, hydration, and SEO
 
 The server renders page markup and serialized signal state into the initial
-HTML. In the browser, `hydrateUiApp` rebuilds the matching UI description from
-that state, checks it against the existing DOM, and attaches bindings and
-events without replacing the server markup. Keep the server and client UI
-structure and `Text.bind` IDs consistent.
+HTML. In a scaffolded UI-contract app, `hydrateUiApp` rebuilds the matching UI
+description from that state. The repository landing page uses `hydrateApp`
+with its shared `MarkupNode` description. Both approaches verify the existing
+DOM and attach bindings and events without replacing server markup. Keep the
+server and client tree and serialized signal IDs consistent.
 
 For page-specific SEO, pass `HeadMetadata` from the server route. Sparrow Kit
 can render titles, descriptions, canonical links, Open Graph and Twitter meta
