@@ -1,0 +1,29 @@
+[
+  {
+    "id": "01",
+    "category": "Digital commerce",
+    "title": "Objects for everyday",
+    "description": "A clearer, more considered storefront for a new generation of makers.",
+    "artLabel": "FORM",
+    "artCaption": "Made to be kept.",
+    "theme": "amber"
+  },
+  {
+    "id": "02",
+    "category": "Brand platform",
+    "title": "A brighter kind of energy",
+    "description": "A confident identity system built to move at the speed of change.",
+    "artLabel": "VOLT",
+    "artCaption": "Power your next.",
+    "theme": "lilac"
+  },
+  {
+    "id": "03",
+    "category": "Culture & editorial",
+    "title": "Room for new voices",
+    "description": "An editorial experience that puts independent culture in focus.",
+    "artLabel": "COMMON",
+    "artCaption": "Culture, in good company.",
+    "theme": "green"
+  }
+]

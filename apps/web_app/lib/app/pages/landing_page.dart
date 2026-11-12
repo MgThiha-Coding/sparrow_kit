@@ -6,8 +6,8 @@ import '../components/contact.dart';
 import '../components/footer.dart';
 import '../components/hero.dart';
 import '../components/navbar.dart';
-import '../components/portfolio.dart';
 import '../components/services.dart';
+import '../features/portfolio/portfolio_section.dart';
 
 const _pageTitle = 'MyCompany | Independent Creative Company';
 const _pageDescription =
@@ -75,7 +75,7 @@ class CompanyLandingPage extends core.Component<void> {
             attributes: const {'id': 'main-content'},
             children: [
               buildHero(),
-              buildPortfolio(),
+              PortfolioSection(),
               buildServices(),
               buildContact(),
             ],
@@ -177,6 +177,12 @@ h1, h2, h3, p { margin-top: 0; }
 .section-heading > .text-link { margin-bottom: 7px; flex-shrink: 0; }
 .project-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
 .project-card { min-width: 0; }
+.portfolio-filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 30px 0; }
+.portfolio-filter { padding: 8px 12px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: transparent; font: inherit; font-size: 11px; cursor: pointer; }
+.portfolio-filter[aria-pressed="true"] { border-color: var(--accent); color: var(--text); background: var(--panel-soft); }
+.portfolio-status { min-height: 1.5em; margin: 0 0 20px; color: var(--muted); font-size: 12px; }
+.portfolio-error { color: #ffb4a2; }
+.portfolio-retry { padding: 7px 11px; border: 1px solid var(--line); border-radius: 5px; color: var(--text); background: var(--panel-soft); font: inherit; font-size: 11px; cursor: pointer; }
 .project-art { position: relative; overflow: hidden; min-height: 290px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 10px; }
 .project-art-amber { color: #e8eef7; background: linear-gradient(145deg, #1a2a3f, #142034); }
 .project-art-lilac { color: #e8eef7; background: linear-gradient(145deg, #1d2b40, #172238); }

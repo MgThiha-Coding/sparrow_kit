@@ -20,9 +20,16 @@ final card = element(
 );
 ```
 
+The restricted `package:sparrow_kit/ui.dart` API provides Dart-native `Text`,
+`Heading`, `Row`, `Column`, `Container`, and `Button` descriptions. It is not
+Flutter widget compatibility. These platform-neutral descriptions lower to the
+same `MarkupNode` model used by SSR and hydration; `mountUi()` renders them as
+DOM and `hydrateUiApp()` attaches to server HTML. See
+[UI contract and web build](ui-contract-and-build.md) for the subset and CLI.
+
 ## Fine-grained reactivity
 
-`Signal<T>` stores a value and notifies only effects that read it. Setting an equal value is a no-op. `effect()` runs once immediately, tracks signal reads during that run, and returns a disposer. Later invalidations are deduplicated and flushed in a microtask, so synchronous writes made before that flush trigger an effect at most once:
+`Signal<T>` stores a value and notifies only effects that read it. Setting an equal value is a no-op, so replace collection values instead of mutating and reassigning the same instance. `effect()` runs once immediately, tracks signal reads during that run, and returns a disposer. Later invalidations are deduplicated and flushed in a microtask, so synchronous writes made before that flush trigger an effect at most once:
 
 ```dart
 Future<void> main() async {
@@ -42,6 +49,31 @@ Future<void> main() async {
 
 `batch()` nests safely and delays scheduling until the outer batch completes. Updates outside an explicit batch use the same microtask scheduler. The DSL binds signal children to text nodes and signal-valued attributes/styles to the corresponding DOM property. These bindings update without rebuilding unrelated nodes. Reading a signal directly inside a component's `render()` makes that component's render effect depend on it.
 
+Prefer a leaf binding for frequently changing values. Passing a signal as a child, attribute, or style lets the DSL update that DOM value directly. Reading `.value` while building a component makes the component depend on the signal; an update reruns the component render and replaces its root. This is appropriate when the whole component should change, but avoid it for small, frequent updates such as counters or progress values.
+
+Replace collection values to notify dependents:
+
+```dart
+final items = Signal<List<String>>([]);
+
+void addItem(String item) {
+  items.value = [...items.value, item];
+}
+```
+
+Use `batch()` when multiple signal writes form one logical state change. Effects are scheduled once per flush, but batching also makes the update boundary explicit:
+
+```dart
+final page = Signal<int>(1);
+final loading = Signal<bool>(false);
+const nextPage = 2;
+
+batch(() {
+  page.value = nextPage;
+  loading.value = true;
+});
+```
+
 This dependency model is intentionally narrower than stream broadcasting: a signal stores subscribers that actually read it, without allocating per-signal stream controllers or delivering values to unrelated listeners. Unlike virtual-DOM rendering, an update invokes affected effects and patches their bound DOM directly instead of diffing a component tree.
 
 Run `dart run tool/reactivity_smoke.dart` from the monorepo root for a dependency-free check of batching, dependency retracking, disposal, and effect-scope cleanup.
@@ -50,7 +82,7 @@ Run `dart run tool/reactivity_smoke.dart` from the monorepo root for a dependenc
 
 `Component<P>` owns a rendered root and its child components. `mount()` or `mountInto()` attaches it once. Override `onMount()`, `onUpdate()`, and `onDispose()` for lifecycle work; `createState<T>()` is a component-scoped convenience for a `Signal<T>`.
 
-Event listeners and reactive work created during a component render are registered in the current cleanup scope. `dispose()` removes the component tree, listeners, and effects. Long-lived resources created in `onMount()` should be explicitly released from `onDispose()`.
+Event listeners and reactive work created during a component render are registered in that render's cleanup scope. They are released when the render is replaced and when the component is disposed. `dispose()` also removes the component tree. Put resources that should live for the mounted component's lifetime in `onMount()` and explicitly release them in `onDispose()`; app- or feature-level resources should be released by their owning app or feature.
 
 ## Functional component API
 
@@ -84,7 +116,7 @@ final page = main(
 );
 ```
 
-Props are passed through as the original typed object; Sparrow Kit does not convert them to a map or clone them. Prefer immutable, typed props. `state.use(initialValue)` returns the same signal for that hook slot across renders and uses the initial value only when the instance is created. Hooks must be called in the same order and with the same types on every render. Call state hooks only synchronously in the builder.
+Props are passed through as the original typed object; Sparrow Kit does not convert them to a map or clone them. Prefer immutable, typed props. `state.use(initialValue)` returns the same signal for that hook slot across renders and uses the initial value only when the instance is created. Hooks must be called synchronously in the same order and with the same types on every render. Keep state hooks unconditional so their slot order remains stable.
 
 The public `ComponentDefinition<P>` stores only the builder reference. For this initial implementation, mounted instances adapt the existing `Component<P>` lifecycle so functional components compose with existing DOM child mounting, effect scopes, and disposal. That adapter carries the current runtime's per-instance bookkeeping; a separate lean mount runtime should only replace it after profiling, not by bypassing cleanup semantics.
 

@@ -7,4 +7,6 @@ environment:
 workspace:
   - apps/android_app
   - apps/web_app
+  - examples/ui_contract
   - packages/sparrow_kit
+  - packages/sparrow_cli

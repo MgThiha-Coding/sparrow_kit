@@ -43,11 +43,16 @@ class RouteMatch {
     required this.path,
     required this.params,
     this.route,
-  }) : isNotFound = route == null;
+    Map<String, String> queryParameters = const {},
+    this.fragment = '',
+  })  : queryParameters = Map<String, String>.unmodifiable(queryParameters),
+        isNotFound = route == null;
 
   final String path;
   final RouteDefinition? route;
   final Map<String, String> params;
+  final Map<String, String> queryParameters;
+  final String fragment;
   final bool isNotFound;
 }
 
@@ -58,7 +63,8 @@ class RouteTable {
   final List<RouteDefinition> routes;
 
   RouteMatch resolve(String path) {
-    final normalizedPath = _normalizePath(path);
+    final uri = Uri.parse(path);
+    final normalizedPath = _normalizePath(uri.path);
     RouteDefinition? bestRoute;
     Map<String, String>? bestParams;
     var bestSpecificity = -1;
@@ -79,6 +85,8 @@ class RouteTable {
       path: normalizedPath,
       route: bestRoute,
       params: bestParams ?? const {},
+      queryParameters: uri.queryParameters,
+      fragment: uri.fragment,
     );
   }
 }

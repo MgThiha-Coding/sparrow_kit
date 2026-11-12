@@ -1,0 +1,15 @@
+name: ui_contract_demo
+publish_to: none
+
+resolution: workspace
+
+environment:
+  sdk: '>=3.6.0 <4.0.0'
+
+dependencies:
+  sparrow_kit:
+    path: ../../packages/sparrow_kit
+
+dev_dependencies:
+  sparrow_cli:
+    path: ../../packages/sparrow_cli

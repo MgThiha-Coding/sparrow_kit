@@ -1,0 +1,12 @@
+name: sparrow_cli
+description: Build DOM-native Sparrow Kit web applications.
+version: 0.1.0
+publish_to: none
+
+resolution: workspace
+
+environment:
+  sdk: '>=3.6.0 <4.0.0'
+
+executables:
+  sparrow_cli: sparrow_cli

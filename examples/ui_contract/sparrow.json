@@ -1,0 +1,8 @@
+{
+  "web": {
+    "client": "web/main.dart",
+    "server": "bin/site.dart",
+    "output": "build/web",
+    "clientOutput": "main.dart.js"
+  }
+}

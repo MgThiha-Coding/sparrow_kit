@@ -159,7 +159,7 @@ Generic defaults cannot infer a production domain, share image, organization, or
 
 ## Routing and state
 
-`Router` matches static and `:parameter` path segments, updates `currentRoute` and parameter signals on navigation and browser back/forward, and exposes `push()` for same-origin paths. It does not impose a page-loading convention:
+`Router` matches static and `:parameter` path segments, exposes path and query parameter signals, and updates route state on navigation, browser history, and hash changes. Same-origin links are intercepted by default while modified clicks, external links, and fragment navigation remain native. The application maps route matches to its own page components:
 
 ```dart
 import 'package:sparrow_kit/sparrow_kit.dart';
@@ -175,14 +175,18 @@ router.push('/products/42');
 final match = router.currentRoute.value;
 ```
 
+For direct path routes on Vercel, configure the deployment output to contain `index.html` and `data/projects.json` at its root; the repository's [vercel.json](vercel.json) rewrites route requests to that app shell. See the [routing and state guide](docs/routing-and-state.md) for interception behavior, query parameters, and deployment details.
+
 Signals are also available directly for application state. Effects track dependencies automatically; use `effect()` for reactive work and call its returned disposer when that work outlives a component.
 
 ## Workspace and mobile isolation
 
 ```text
 apps/android_app/       # Independent package; no sparrow_kit dependency
-apps/web_app/           # Landing page, counter, and SSR/hydration example
+apps/web_app/           # Landing page, typed portfolio API/store, counter, SSR/hydration
+examples/ui_contract/   # Shared UI description, SSR, and hydration demo
 packages/sparrow_kit/    # Framework package
+packages/sparrow_cli/    # DOM web build orchestration
 docs/                   # Guides
 ```
 
@@ -193,6 +197,7 @@ dart pub get
 dart analyze .
 dart run tool/reactivity_smoke.dart
 dart run tool/ssr_defaults_smoke.dart
+dart run tool/portfolio_store_smoke.dart
 ```
 
 The Android package has no SparrowKit dependency edge; the web runtime is imported by web code only. Dart's normal reachability/tree-shaking behavior remains compiler- and application-dependent.
@@ -203,3 +208,4 @@ The Android package has no SparrowKit dependency edge; the web runtime is import
 - [Architecture](docs/architecture.md)
 - [Routing and state](docs/routing-and-state.md)
 - [SSR, hydration, and SEO](docs/ssr-and-seo.md)
+- [UI contract and web build](docs/ui-contract-and-build.md)
