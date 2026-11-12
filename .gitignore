@@ -1,0 +1,29 @@
+# Dart and Pub
+.dart_tool/
+.packages
+.pub/
+.pub-cache/
+build/
+coverage/
+
+# Compiled Dart-to-JavaScript and VM output
+*.dart.js
+*.dart.js.deps
+*.dart.js.map
+*.js.deps
+*.js.map
+*.info.json
+*.dill
+*.snapshot
+*.exe
+*.wasm
+*.wasm.map
+
+# Flutter-generated plugin metadata
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# Editor and operating-system files
+.idea/
+.DS_Store
+Thumbs.db

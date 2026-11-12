@@ -1,0 +1,1 @@
+export '../../rendering/component.dart';

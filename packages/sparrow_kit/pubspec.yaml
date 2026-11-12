@@ -1,0 +1,13 @@
+name: sparrow_kit
+description: A DOM-first Dart web framework with fine-grained reactivity, SSR, and SEO.
+version: 1.0.0
+repository: https://github.com/MgThiha-Coding/flutter_web_framework
+publish_to: none
+
+resolution: workspace
+
+environment:
+  sdk: '>=3.6.0 <4.0.0'
+
+dependencies:
+  web: ^0.5.0

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <rect width="1200" height="630" fill="#0b1220"/>
+  <circle cx="1000" cy="120" r="290" fill="#8fb4e8" opacity=".08"/>
+  <circle cx="1000" cy="120" r="210" fill="none" stroke="#8fb4e8" stroke-opacity=".22" stroke-width="2"/>
+  <rect x="88" y="82" width="48" height="48" rx="10" fill="#8fb4e8"/>
+  <text x="112" y="114" fill="#0b1220" font-family="Arial, sans-serif" font-size="24" font-weight="800" text-anchor="middle">M</text>
+  <text x="154" y="113" fill="#f3f6fb" font-family="Arial, sans-serif" font-size="20" font-weight="700" letter-spacing="4">MYCOMPANY</text>
+  <text x="88" y="300" fill="#8fb4e8" font-family="Arial, sans-serif" font-size="20" font-weight="700" letter-spacing="4">INDEPENDENT CREATIVE COMPANY</text>
+  <text x="84" y="410" fill="#f3f6fb" font-family="Arial, sans-serif" font-size="76" font-weight="600" letter-spacing="-3">Ideas in motion.</text>
+  <text x="90" y="478" fill="#a5b1c2" font-family="Arial, sans-serif" font-size="27">Thoughtful brands, digital products, and experiences.</text>
+  <rect x="88" y="540" width="90" height="6" rx="3" fill="#8fb4e8"/>
+</svg>

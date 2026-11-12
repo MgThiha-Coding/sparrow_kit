@@ -1,0 +1,13 @@
+name: web_app
+publish_to: none
+
+resolution: workspace
+
+environment:
+  sdk: '>=3.6.0 <4.0.0'
+
+dependencies:
+  sparrow_kit:
+    path: ../../packages/sparrow_kit
+  shelf: '>=1.4.2 <1.4.3'
+  web: ^0.5.0
