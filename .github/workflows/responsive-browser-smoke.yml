@@ -35,8 +35,10 @@ jobs:
           dart run tool/ui_contract_smoke.dart
           dart run tool/ssr_defaults_smoke.dart
           dart run tool/sparrow_cli_build_smoke.dart
+          dart run tool/sparrow_cli_workflow_smoke.dart
           dart run tool/seo_smoke.dart
           dart run tool/router_smoke.dart
+          dart run tool/route_catalog_smoke.dart
           dart run tool/portfolio_store_smoke.dart
 
       - name: Compile browser smoke fixture
@@ -93,7 +95,7 @@ jobs:
             --no-sandbox \
             --disable-gpu \
             --disable-dev-shm-usage \
-            --virtual-time-budget=60000 \
+            --virtual-time-budget=180000 \
             --dump-dom \
             http://127.0.0.1:8765/tool/ui_contract_responsive_ci.html \
             >"$result_file" 2>&1; then

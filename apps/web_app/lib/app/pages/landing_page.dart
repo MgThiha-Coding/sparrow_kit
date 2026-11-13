@@ -46,14 +46,16 @@ String landingCategorySignalId(int index) => 'landing_category_$index';
 String landingProjectHiddenSignalId(int index) =>
     'landing_project_${index}_hidden';
 
-HeadMetadata companyLandingMetadata() => HeadMetadata(
+HeadMetadata companyLandingMetadata({String? canonicalUrl}) => HeadMetadata(
       title: 'MyCompany | Independent Creative Company',
       description:
           'An independent creative company building thoughtful brands, digital products, and experiences for people shaping what comes next.',
+      canonicalUrl: canonicalUrl,
       metaTags: [
         MetaTag.name('viewport', 'width=device-width, initial-scale=1'),
         MetaTag.name('theme-color', '#0b1220'),
         MetaTag.property('og:type', 'website'),
+        if (canonicalUrl != null) MetaTag.property('og:url', canonicalUrl),
         MetaTag.property(
           'og:title',
           'MyCompany | Independent Creative Company',

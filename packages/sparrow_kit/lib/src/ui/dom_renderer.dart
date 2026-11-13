@@ -20,12 +20,15 @@ class DomUiRenderer {
   bool _isDisposed = false;
 
   web.Node render(UiNode description) {
+    return renderMarkupTree(toMarkupNode(description));
+  }
+
+  web.Node renderMarkupTree(MarkupNode tree) {
     if (_root != null) {
       throw StateError('A UI renderer can only render once.');
     }
 
     try {
-      final tree = toMarkupNode(description);
       _cleanups.add(installMarkupStylesheets(tree));
       final root = _renderNode(tree);
       _root = root;
@@ -259,6 +262,13 @@ UiComponentDefinition<P> uiComponent<P>(UiComponentBuilder<P> build) =>
 web.Node renderUi(UiNode description) {
   final renderer = DomUiRenderer();
   final root = renderer.render(description);
+  onCleanup(renderer.dispose);
+  return root;
+}
+
+web.Node renderMarkup(MarkupNode description) {
+  final renderer = DomUiRenderer();
+  final root = renderer.renderMarkupTree(description);
   onCleanup(renderer.dispose);
   return root;
 }

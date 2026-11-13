@@ -39,6 +39,8 @@ UiNode counterPage(Signal<int> count) => Container(
 
 `Text.bind` requires a stable ID shared by SSR and hydration. IDs use letters, digits, and underscores, beginning with a letter or underscore. The server serializes the signal's initial value and places markers around its text. Hydration verifies those markers and the initial value before attaching the effect and event listeners. It does not replace the hydrated DOM.
 
+An active container can only be hydrated once. Its disposer removes bindings and releases it for a later hydration. A mismatch fails explicitly, cleans up bindings already attached, and leaves the server markup in place; invalid serialized values report the affected signal ID.
+
 `mountUi()` renders a client-only UI tree and returns a disposer. Both direct mounting and hydration dispose bindings and event listeners when their disposer is called. A signal update patches the bound text node, not the component root. Conditional UI is explicit; `KeyedList<T>` provides the supported reactive collection primitive for adding, removing, updating, and reordering children.
 
 ## Keyed child lists
@@ -251,11 +253,17 @@ dev_dependencies:
 The build command:
 
 1. Runs `dart analyze` on the configured client and server entry points.
-2. Clears the output directory, then copies non-Dart assets from `web/`.
-3. Runs the server entry point with the output directory and root-relative client script. That entry point owns the explicit route list and SSR.
-4. Compiles the configured browser entry point with `dart compile js`.
+2. Copies non-Dart assets from `web/` into a staging directory.
+3. Runs the server entry point with the staging output directory and root-relative client script. That entry point owns the explicit route list and SSR/SSG.
+4. Compiles the configured browser entry point with `dart compile js -O2` for production; source maps and compiler dependency manifests are omitted from production output.
+5. Publishes the new output only after all steps succeed, preserving the previous build on failure.
 
 The analyzer checks Dart validity and types. It is not used to execute components, infer route tables, or translate Flutter widget trees. The app must use Sparrow Kit's supported UI API. Unsupported widget types are not silently approximated.
+
+Development builds use `-O0` and retain compiler source maps for debugging.
+Production CSS and other static assets are copied unchanged; generated SSR HTML
+is already emitted compactly. Nested SSG pages use root-relative client asset
+URLs, so the build output is intended to be served from a domain root.
 
 In this monorepo, run from `examples/ui_contract`:
 
@@ -269,6 +277,13 @@ The company landing page is wired to the same workflow in `apps/web_app`:
 cd apps/web_app
 dart run sparrow_cli build web
 ```
+
+`web.output` configures the output directory. Use repeatable
+`--define NAME=VALUE` options with `sparrow dev` or `sparrow build web` to pass
+Dart compile-time values to both the server entry point and JavaScript compiler.
+These values may be present in rendered HTML or browser code; do not use them
+for secrets. The CLI subprocesses also inherit normal process environment
+variables.
 
 The CLI is deliberately an orchestration layer around user-provided entry points. It does not replace or intercept `flutter build web`.
 

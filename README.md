@@ -141,9 +141,27 @@ The build reads `sparrow.json`. A scaffolded project uses a configuration like:
 The CLI then:
 
 1. Analyzes the configured client and server entry points.
-2. Clears the output directory and copies non-Dart assets from `web/`.
-3. Runs the server entry point to generate the declared SSR routes and HTML.
-4. Compiles the client entry point with `dart compile js -O2`.
+2. Copies non-Dart assets from `web/` into a staging directory.
+3. Runs the server entry point to generate the declared SSR/SSG routes and HTML.
+4. Compiles the client entry point with `dart compile js -O2`, without source maps or compiler dependency manifests in production output.
+5. Replaces the previous output only after every build step succeeds.
+
+Development builds use unoptimized JavaScript and retain source maps. CSS and
+other static assets are copied as authored; generated SSR HTML is emitted
+compactly. Nested static pages use root-relative asset URLs and are intended
+for hosting at a domain root.
+
+Pass repeatable Dart compile-time values to both the server entry point and
+browser compiler with `--define NAME=VALUE`:
+
+```sh
+sparrow dev --define APP_TITLE="My Sparrow app"
+sparrow build web --define APP_TITLE="My Sparrow app"
+```
+
+Define values are compiled into server-rendered output or the browser bundle;
+never use this option for secrets. Ordinary process environment variables are
+also inherited by the CLI subprocesses.
 
 ### Build this repository's landing page
 
@@ -181,6 +199,12 @@ provides the mechanisms; your app supplies accurate page-specific values and
 public URLs. No framework can guarantee indexing, rankings, or rich-result
 eligibility across search engines.
 
+For client-side navigation, mount `RouteView.fromCatalog` in the application
+component. `RouteCatalog` shares route definitions, page builders, and metadata
+across client navigation, request-time SSR, and explicitly selected SSG paths.
+Route changes update the view without replacing the surrounding shell or
+re-running hydration.
+
 ## Runtime and compatibility
 
 - Dart SDK `>=3.6.0 <4.0.0` to build the app and generate SSR HTML
@@ -188,9 +212,11 @@ eligibility across search engines.
 
 `sparrow build web` writes static HTML, JavaScript, and assets to `build/web`;
 serving that output does not require a Dart server. `sparrow dev` runs a local
-Dart development server. For request-time SSR, use `StringRenderer` from your
-own Dart HTTP handler; Sparrow Kit provides rendering primitives, not a
-production HTTP server adapter.
+Dart development server and shuts down cleanly on Ctrl+C. When launched with
+piped input, closing stdin also requests graceful shutdown for process
+supervisors. For request-time SSR, use `StringRenderer` from your own Dart HTTP
+handler; Sparrow Kit provides rendering primitives, not a production HTTP
+server adapter.
 
 `Text`, `Row`, `Column`, `Container`, `Heading`, and `Button` are Sparrow Kit
 APIs, not Flutter widgets. The initial layout contract uses CSS flexbox;

@@ -3,6 +3,7 @@ import 'dart:js_interop';
 import 'package:web/web.dart' as web;
 
 import '../../reactivity/signals.dart';
+import 'route_catalog.dart';
 import 'route_table.dart';
 
 export 'route_table.dart';
@@ -11,8 +12,23 @@ class Router {
   Router({
     required Iterable<RouteDefinition> routes,
     bool interceptLinks = true,
-  })  : routeTable = RouteTable(routes: routes),
-        _interceptLinks = interceptLinks {
+  }) : this._(
+          RouteTable(routes: routes),
+          interceptLinks: interceptLinks,
+        );
+
+  Router.fromCatalog({
+    required RouteCatalog catalog,
+    bool interceptLinks = true,
+  }) : this._(
+          catalog.routeTable,
+          interceptLinks: interceptLinks,
+        );
+
+  Router._(
+    this.routeTable, {
+    required bool interceptLinks,
+  }) : _interceptLinks = interceptLinks {
     final initialMatch = routeTable.resolve(_browserLocation);
     currentRoute = Signal<RouteMatch>(initialMatch);
     params = Signal<Map<String, String>>(initialMatch.params);

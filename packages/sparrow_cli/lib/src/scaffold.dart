@@ -141,7 +141,7 @@ Future<void> main(List<String> arguments) async {
       StaticPage(
         path: '/',
         component: UiPage(() => buildHomePage(Signal<int>(0))),
-        metadata: const HeadMetadata(
+        metadata: HeadMetadata(
           title: 'Sparrow Kit app',
           description: 'A server-rendered Dart web app.',
         ),

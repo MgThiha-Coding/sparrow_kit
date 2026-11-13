@@ -1,7 +1,7 @@
 import 'dart:io';
 
 import 'package:sparrow_kit/server.dart';
-import 'package:web_app/app/pages/landing_page.dart';
+import 'package:web_app/app/route_catalog.dart';
 
 Future<void> main(List<String> arguments) async {
   if (arguments.length != 2) {
@@ -10,17 +10,15 @@ Future<void> main(List<String> arguments) async {
     );
   }
 
-  await StaticSiteGenerator(
-    clientScript: arguments[1],
-    siteBaseUrl: Platform.environment['SPARROW_SITE_URL'],
-  ).generate(
-    [
-      StaticPage(
-        path: '/',
-        component: CompanyLandingPage(LandingPageState.initial()),
-        metadata: companyLandingMetadata(),
-      ),
-    ],
+  final siteBaseUrl = Platform.environment['SPARROW_SITE_URL'];
+  await companyRouteCatalog(siteBaseUrl: siteBaseUrl).generateStaticSite(
+    concretePathsByRoute: const {
+      '/': ['/']
+    },
     outputDirectory: arguments.first,
+    generator: StaticSiteGenerator(
+      clientScript: arguments[1],
+      siteBaseUrl: siteBaseUrl,
+    ),
   );
 }

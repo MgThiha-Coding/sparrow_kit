@@ -10,7 +10,8 @@ import '../../rendering/markup_dom_fragment.dart';
 import '../ssr/markup.dart';
 
 class HydrationState {
-  HydrationState(Map<String, Object?> values) : _values = values;
+  HydrationState(Map<String, Object?> values)
+      : _values = Map<String, Object?>.unmodifiable(values);
 
   factory HydrationState.fromDocument() {
     final script = web.document.getElementById('__FRAMEWORK_STATE__');
@@ -35,13 +36,26 @@ class HydrationState {
     T Function(Object?)? decode,
   }) {
     final existing = _signals[id];
-    if (existing != null) return existing as Signal<T>;
+    if (existing != null) {
+      if (existing is! Signal<T>) {
+        throw StateError(
+          'Hydration signal "$id" was requested with inconsistent types.',
+        );
+      }
+      return existing;
+    }
 
+    final rawValue = _values[id];
     final value = _values.containsKey(id)
         ? decode == null
-            ? _values[id] as T
-            : decode(_values[id])
+            ? rawValue
+            : decode(rawValue)
         : fallback;
+    if (value is! T) {
+      throw FormatException(
+        'Serialized value for hydration signal "$id" is not a ${T.toString()}.',
+      );
+    }
     final signal = Signal<T>(value);
     _signals[id] = signal;
     return signal;
@@ -49,10 +63,19 @@ class HydrationState {
 }
 
 class HydrationEngine {
+  static final Expando<Object> _activeHydrations =
+      Expando<Object>('SparrowKit active hydration');
+
   void Function() hydrate({
     required web.Element container,
     required MarkupNode tree,
   }) {
+    if (_activeHydrations[container] != null) {
+      throw StateError('This container is already being hydrated.');
+    }
+    final hydrationToken = Object();
+    _activeHydrations[container] = hydrationToken;
+
     final cleanups = <void Function()>[];
     try {
       cleanups.add(installMarkupStylesheets(tree));
@@ -61,16 +84,32 @@ class HydrationEngine {
       if (nextNode != null) {
         throw StateError('Unexpected DOM node after the hydrated root.');
       }
-    } catch (_) {
-      _runCleanups(cleanups);
-      rethrow;
+    } catch (error, stackTrace) {
+      _activeHydrations[container] = null;
+      try {
+        _runCleanups(cleanups);
+      } catch (cleanupError, cleanupStackTrace) {
+        Error.throwWithStackTrace(
+          StateError(
+            'Hydration failed: $error. Cleanup also failed: $cleanupError.',
+          ),
+          cleanupStackTrace,
+        );
+      }
+      Error.throwWithStackTrace(error, stackTrace);
     }
 
     var isDisposed = false;
     return () {
       if (isDisposed) return;
       isDisposed = true;
-      _runCleanups(cleanups);
+      try {
+        _runCleanups(cleanups);
+      } finally {
+        if (identical(_activeHydrations[container], hydrationToken)) {
+          _activeHydrations[container] = null;
+        }
+      }
     };
   }
 
@@ -98,7 +137,8 @@ class HydrationEngine {
         if (textNode is! web.Text) {
           throw StateError('Missing signal text node at $path.');
         }
-        if (textNode.data != _textValue(signal.value)) {
+        final initialValue = ReactiveContext.untracked(() => signal.value);
+        if (textNode.data != _textValue(initialValue)) {
           throw StateError('Signal text value mismatch at $path.');
         }
         final endMarker = textNode.nextSibling;
@@ -132,8 +172,9 @@ class HydrationEngine {
 
         for (final attribute in attributes.entries) {
           final value = attribute.value;
-          final initialValue =
-              value is SignalAttribute ? value.signal.value : value;
+          final initialValue = value is SignalAttribute
+              ? ReactiveContext.untracked(() => value.signal.value)
+              : value;
           if (node.getAttribute(attribute.key) !=
               _attributeValue(initialValue)) {
             throw StateError(
@@ -360,10 +401,20 @@ class _HydratedKeyedItem {
 }
 
 void _runCleanups(List<void Function()> cleanups) {
+  Object? firstError;
+  StackTrace? firstStackTrace;
   for (final cleanup in cleanups.reversed) {
-    cleanup();
+    try {
+      cleanup();
+    } catch (error, stackTrace) {
+      firstError ??= error;
+      firstStackTrace ??= stackTrace;
+    }
   }
   cleanups.clear();
+  if (firstError != null) {
+    Error.throwWithStackTrace(firstError, firstStackTrace!);
+  }
 }
 
 String _textValue(Object? value) => value?.toString() ?? '';

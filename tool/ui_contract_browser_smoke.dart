@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:js_interop';
 
 import 'package:sparrow_kit/sparrow_kit.dart';
 import 'package:web/web.dart' as web;
@@ -8,6 +10,15 @@ final MarkupEventHandler _keyedButtonHandler = _recordKeyedButtonClick;
 
 void _recordKeyedButtonClick(Object? _) {
   _keyedButtonClicks++;
+}
+
+class _MarkupSsrFixture implements SsrComponent {
+  _MarkupSsrFixture(this.node);
+
+  final MarkupNode node;
+
+  @override
+  MarkupNode render() => node;
 }
 
 class _LifecycleCounters {
@@ -115,6 +126,8 @@ Future<void> _runSmoke() async {
   if (app == null || direct == null || componentHost == null) {
     throw StateError('Browser smoke test roots are missing.');
   }
+
+  _testHydrationFailureRecoveryAndStateSafety();
 
   final serverHtml = renderToString(
     UiPage(
@@ -584,7 +597,1064 @@ Future<void> _runSmoke() async {
     'HeadManager did not restore document metadata when disposed',
   );
 
+  await _testBrowserRouter();
+  await _testRouteView();
+  await _testCatalogRouteView();
   web.document.body!.setAttribute('data-test-result', 'passed');
+}
+
+Future<void> _testCatalogRouteView() async {
+  const initialLocation = '/catalog-view/users/17?tab=initial';
+  web.window.history.replaceState(null, '', initialLocation);
+  final clickCount = Signal(0);
+  final wasClicked = Signal(false);
+  final catalogItems = Signal<List<String>>(['first']);
+  final catalog = RouteCatalog(
+    routes: [
+      RouteConfig(
+        definition: RouteDefinition('/catalog-view/users/:userId'),
+        pageBuilder: (match) {
+          final userId = match.params['userId']!;
+          return UiPage(
+            () => Column(
+              attributes: const {'data-route-page': 'user'},
+              children: [
+                Heading(1, 'catalog user:$userId'),
+                Text('catalog tab:${match.queryParameters['tab'] ?? ''}'),
+                const Text('catalog click count:'),
+                Text.bind('catalog_user_click_count_$userId', clickCount),
+                Button(
+                  label: 'increment user clicks',
+                  onPressed: (_) {
+                    clickCount.value++;
+                    wasClicked.value = true;
+                    catalogItems.value = [
+                      ...catalogItems.value,
+                      'next',
+                    ];
+                  },
+                  attributes: {
+                    'data-clicked': SignalAttribute(
+                      'catalog_user_clicked_$userId',
+                      wasClicked,
+                    ),
+                  },
+                ),
+                KeyedList<String>(
+                  id: 'catalog_user_items_$userId',
+                  items: catalogItems,
+                  keyOf: (item) => item,
+                  itemBuilder: (item) => Text(item),
+                  attributes: const {'data-catalog-list': 'true'},
+                ),
+              ],
+            ),
+          );
+        },
+        metadataBuilder: (match) {
+          final userId = match.params['userId']!;
+          final canonicalUrl =
+              'https://example.test/catalog-view/users/$userId/';
+          return HeadMetadata(
+            title: 'Catalog user $userId',
+            description: 'Profile for catalog user $userId',
+            canonicalUrl: canonicalUrl,
+            openGraph: OpenGraphMetadata(
+              title: 'Catalog OG user $userId',
+              type: 'profile',
+              url: canonicalUrl,
+              image: 'https://example.test/user.png',
+              description: 'OG profile for user $userId',
+            ),
+            twitterCard: TwitterCardMetadata(
+              card: 'summary_large_image',
+              title: 'Catalog Twitter user $userId',
+              description: 'Twitter profile for user $userId',
+            ),
+            robots: const RobotsDirectives(),
+            jsonLd: const [
+              OrganizationJsonLd(
+                name: 'Sparrow Catalog',
+                url: 'https://example.test/catalog/',
+              ),
+            ],
+          );
+        },
+      ),
+      RouteConfig(
+        definition: RouteDefinition('/catalog-view/about'),
+        indexable: false,
+        pageBuilder: (_) => UiPage(
+          () => Heading(
+            1,
+            'catalog about',
+            attributes: const {'data-route-page': 'about'},
+          ),
+        ),
+        metadataBuilder: (_) => HeadMetadata(
+          title: 'Catalog about',
+          canonicalUrl: 'https://example.test/catalog-view/about/',
+        ),
+      ),
+    ],
+    notFoundBuilder: (match) => UiPage(
+      () => Heading(
+        1,
+        'catalog missing:${match.path}',
+        attributes: const {'data-route-page': 'not-found'},
+      ),
+    ),
+    notFoundMetadataBuilder: (_) => HeadMetadata(
+      title: 'Catalog Not Found',
+      description: 'This catalog route does not exist.',
+      robots: const RobotsDirectives(index: false),
+    ),
+  );
+
+  await _testCatalogDynamicHydrationAndNavigation(catalog, initialLocation);
+  await _testCatalogStaticDirectHydration(catalog);
+  _testCatalogHydrationMismatch(catalog);
+}
+
+void _testHydrationFailureRecoveryAndStateSafety() {
+  const payload =
+      '</script><img id="hydration-injected" src=x onerror="alert(1)">';
+  final serializedHtml = renderToString(
+    _MarkupSsrFixture(SignalText('state_payload', Signal<String>(payload))),
+    clientScript: null,
+  );
+  final serializedDocument =
+      web.DOMParser().parseFromString(serializedHtml, 'text/html');
+  final stateScript = serializedDocument.getElementById('__FRAMEWORK_STATE__');
+  if (stateScript == null) {
+    throw StateError('Serialized hydration state was not rendered.');
+  }
+  final decodedState =
+      jsonDecode(stateScript.textContent!) as Map<String, dynamic>;
+  _expect(
+    decodedState['state_payload'] == payload &&
+        !stateScript.textContent!.contains('</script>') &&
+        serializedDocument.getElementById('hydration-injected') == null,
+    'Serialized hydration state was not safely escaped.',
+  );
+
+  Object? invalidStateError;
+  try {
+    HydrationState({'count': 'not an integer'})
+        .signal<int>('count', fallback: 0);
+  } on FormatException catch (error) {
+    invalidStateError = error;
+  }
+  _expect(
+    invalidStateError.toString().contains('hydration signal "count"'),
+    'Invalid serialized signal state lacked a useful diagnostic.',
+  );
+
+  final repeatedState = HydrationState({'shared': 1});
+  repeatedState.signal<int>('shared', fallback: 0);
+  Object? inconsistentTypeError;
+  try {
+    repeatedState.signal<String>('shared', fallback: '');
+  } on StateError catch (error) {
+    inconsistentTypeError = error;
+  }
+  _expect(
+    inconsistentTypeError.toString().contains(
+        'Hydration signal "shared" was requested with inconsistent types'),
+    'A reused hydration signal accepted an inconsistent type.',
+  );
+
+  var clicks = 0;
+  const stylesheet = '.hydration-rollback-fixture { color: red; }';
+  final tree = MarkupElement(
+    'div',
+    stylesheets: [stylesheet],
+    children: [
+      MarkupElement(
+        'button',
+        events: {'click': (_) => clicks++},
+        children: [MarkupText('early listener')],
+      ),
+      MarkupElement('span', children: [MarkupText('expected text')]),
+    ],
+  );
+  final serverHtml =
+      renderToString(_MarkupSsrFixture(tree), clientScript: null);
+  final serverDocument =
+      web.DOMParser().parseFromString(serverHtml, 'text/html');
+  final serverRoot = serverDocument.getElementById('app')?.firstChild;
+  if (serverRoot == null) {
+    throw StateError('Hydration rollback fixture has no server-rendered root.');
+  }
+
+  final host = web.document.createElement('div');
+  host.appendChild(serverRoot.cloneNode(true));
+  web.document.body!.appendChild(host);
+  final spanText = host.querySelector('span')?.firstChild;
+  if (spanText is! web.Text) {
+    host.remove();
+    throw StateError('Hydration rollback fixture text node is missing.');
+  }
+  spanText.data = 'mismatched text';
+  final markupBeforeFailure = host.innerHTML;
+  final stylesheetId = markupStylesheetId(stylesheet);
+  final styleExistedBefore = web.document.getElementById(stylesheetId) != null;
+  final engine = HydrationEngine();
+  void Function()? disposeHydration;
+
+  try {
+    Object? mismatch;
+    try {
+      engine.hydrate(container: host, tree: tree);
+    } on StateError catch (error) {
+      mismatch = error;
+    }
+    _expect(
+      mismatch.toString().contains('Text mismatch at root/div[1]/span[0]') &&
+          host.innerHTML == markupBeforeFailure &&
+          (web.document.getElementById(stylesheetId) != null) ==
+              styleExistedBefore,
+      'Failed hydration changed server markup or retained its stylesheet.',
+    );
+    (host.querySelector('button')! as web.HTMLButtonElement).click();
+    _expect(clicks == 0, 'Failed hydration left an event listener attached.');
+
+    spanText.data = 'expected text';
+    final serverRootAfterRepair = host.firstChild;
+    disposeHydration = engine.hydrate(container: host, tree: tree);
+    _expect(
+      identical(host.firstChild, serverRootAfterRepair) &&
+          web.document.getElementById(stylesheetId) != null,
+      'Recovered hydration did not reuse the repaired SSR root.',
+    );
+    final activeDisposer = disposeHydration;
+
+    Object? repeatedHydrationError;
+    try {
+      HydrationEngine().hydrate(container: host, tree: tree);
+    } on StateError catch (error) {
+      repeatedHydrationError = error;
+    }
+    _expect(
+      repeatedHydrationError
+          .toString()
+          .contains('This container is already being hydrated'),
+      'Repeated hydration was not rejected while bindings were active.',
+    );
+    (host.querySelector('button')! as web.HTMLButtonElement).click();
+    _expect(clicks == 1, 'Repeated hydration attached a duplicate listener.');
+
+    activeDisposer();
+    activeDisposer();
+    (host.querySelector('button')! as web.HTMLButtonElement).click();
+    _expect(
+      clicks == 1 && web.document.getElementById(stylesheetId) == null,
+      'Hydration disposal left listeners or stylesheets active.',
+    );
+
+    disposeHydration = engine.hydrate(container: host, tree: tree);
+    (host.querySelector('button')! as web.HTMLButtonElement).click();
+    _expect(
+      clicks == 2,
+      'A disposed container could not be hydrated cleanly again.',
+    );
+  } finally {
+    disposeHydration?.call();
+    host.remove();
+  }
+}
+
+Future<void> _testCatalogDynamicHydrationAndNavigation(
+  RouteCatalog catalog,
+  String initialLocation,
+) async {
+  final originalHead = web.document.head!.innerHTML;
+  final originalTitle = web.document.title;
+  final originalLanguage = web.document.documentElement?.getAttribute('lang');
+  final initialHtml =
+      catalog.renderRequest(initialLocation, clientScript: null).html;
+  final parsedDocument =
+      web.DOMParser().parseFromString(initialHtml, 'text/html');
+  final serverRoot = parsedDocument.getElementById('app');
+  if (serverRoot?.firstChild == null || parsedDocument.head == null) {
+    throw StateError('The route catalog did not render initial server markup.');
+  }
+
+  final host = web.document.createElement('div');
+  host.appendChild(serverRoot!.firstChild!.cloneNode(true));
+  final serverPageRoot = host.firstChild;
+  web.document.body!.appendChild(host);
+  web.document.head!.innerHTML = parsedDocument.head!.innerHTML;
+  web.document.documentElement!.setAttribute(
+    'lang',
+    parsedDocument.documentElement!.getAttribute('lang')!,
+  );
+  final serverCanonical =
+      web.document.head!.querySelector('link[rel="canonical"]');
+  final serverDescription =
+      web.document.head!.querySelector('meta[name="description"]');
+  final serverOpenGraph =
+      web.document.head!.querySelector('meta[property="og:title"]');
+  final serverTwitter =
+      web.document.head!.querySelector('meta[name="twitter:card"]');
+  final serverJsonLd =
+      web.document.head!.querySelector('script[type="application/ld+json"]');
+  final router = Router.fromCatalog(catalog: catalog);
+  final routeView = RouteView.fromCatalog(
+    router: router,
+    catalog: catalog,
+    hydrateExisting: true,
+  );
+  var pageLifecycleEvents = 0;
+  final pageLifecycleListener = ((web.Event _) => pageLifecycleEvents++).toJS;
+  web.window.addEventListener('beforeunload', pageLifecycleListener);
+  web.window.addEventListener('pagehide', pageLifecycleListener);
+
+  try {
+    routeView.mountInto(host);
+    _expect(
+      identical(router.routeTable, catalog.routeTable) &&
+          identical(host.firstChild, serverPageRoot) &&
+          host.textContent!.contains('catalog user:17') &&
+          host.textContent!.contains('catalog tab:initial') &&
+          router.currentRoute.value.params['userId'] == '17' &&
+          router.currentRoute.value.queryParameters['tab'] == 'initial' &&
+          host.querySelectorAll('h1').length == 1 &&
+          web.document.title == 'Catalog user 17' &&
+          identical(
+            web.document.head!.querySelector('link[rel="canonical"]'),
+            serverCanonical,
+          ) &&
+          identical(
+            web.document.head!.querySelector('meta[name="description"]'),
+            serverDescription,
+          ) &&
+          identical(
+            web.document.head!.querySelector('meta[property="og:title"]'),
+            serverOpenGraph,
+          ) &&
+          identical(
+            web.document.head!.querySelector('meta[name="twitter:card"]'),
+            serverTwitter,
+          ) &&
+          web.document.head!
+                  .querySelectorAll('script[type="application/ld+json"]')
+                  .length ==
+              1 &&
+          identical(
+            web.document.head!
+                .querySelector('script[type="application/ld+json"]'),
+            serverJsonLd,
+          ),
+      'Direct dynamic-route hydration replaced DOM or duplicated SSR metadata.',
+    );
+
+    final serverButton = host.querySelector('button') as web.HTMLButtonElement;
+    final hydratedRoot = host.firstChild;
+    final serverList = host.querySelector('ul');
+    final serverFirstItem = host.querySelector('li');
+    if (serverList == null || serverFirstItem == null) {
+      throw StateError('The direct route did not render keyed child markup.');
+    }
+    serverButton.click();
+    await _waitForRouteViewText(host, 'catalog click count:1');
+    await _waitForRouteViewText(host, 'next');
+    final didPreserveRoot = identical(host.firstChild, hydratedRoot);
+    final didPreserveButton =
+        identical(host.querySelector('button'), serverButton);
+    final didPreserveKeyedNodes =
+        identical(host.querySelector('ul'), serverList) &&
+            identical(host.querySelector('li'), serverFirstItem);
+    final hasReactiveText = host.textContent!.contains('catalog click count:1');
+    final hasReactiveAttribute = serverButton.hasAttribute('data-clicked');
+    _expect(
+      didPreserveRoot &&
+          didPreserveButton &&
+          didPreserveKeyedNodes &&
+          hasReactiveText &&
+          hasReactiveAttribute &&
+          host.textContent!.contains('catalog user:17') &&
+          pageLifecycleEvents == 0,
+      'Hydrated event/reactive behavior failed: root=$didPreserveRoot, '
+      'button=$didPreserveButton, keyed=$didPreserveKeyedNodes, '
+      'text=$hasReactiveText, '
+      'attribute=$hasReactiveAttribute, '
+      'lifecycle=$pageLifecycleEvents.',
+    );
+
+    router.push('/catalog-view/users/42?tab=details');
+    await _waitForCatalogRoute(host, 'catalog user:42', 'Catalog user 42');
+    _expect(
+      host.textContent!.contains('catalog tab:details') &&
+          web.document.head
+                  ?.querySelector('link[rel="canonical"]')
+                  ?.getAttribute('href') ==
+              'https://example.test/catalog-view/users/42/' &&
+          web.document.head
+                  ?.querySelector('meta[property="og:title"]')
+                  ?.getAttribute('content') ==
+              'Catalog OG user 42' &&
+          web.document.head
+                  ?.querySelector('meta[name="twitter:title"]')
+                  ?.getAttribute('content') ==
+              'Catalog Twitter user 42' &&
+          web.document.head
+                  ?.querySelector('meta[name="robots"]')
+                  ?.getAttribute('content') ==
+              'index, follow' &&
+          web.document.head!
+                  .querySelectorAll('script[type="application/ld+json"]')
+                  .length ==
+              1 &&
+          router.currentRoute.value.queryParameters['tab'] == 'details',
+      'Dynamic route navigation did not synchronize URL, content, and metadata.',
+    );
+
+    router.push('/catalog-view/about?tab=legal');
+    await _waitForCatalogRoute(host, 'catalog about', 'Catalog about');
+    _expect(
+      router.currentRoute.value.route?.path == '/catalog-view/about' &&
+          router.currentRoute.value.queryParameters['tab'] == 'legal' &&
+          web.document.head!.querySelector('meta[name="description"]') ==
+              null &&
+          web.document.head!.querySelector('meta[property^="og:"]') == null &&
+          web.document.head!.querySelector('meta[name^="twitter:"]') == null &&
+          web.document.head!
+                  .querySelector('link[rel="canonical"]')
+                  ?.getAttribute('href') ==
+              'https://example.test/catalog-view/about/' &&
+          web.document.head
+                  ?.querySelector('meta[name="robots"]')
+                  ?.getAttribute('content') ==
+              'noindex, follow' &&
+          web.document.head!
+                  .querySelectorAll('script[type="application/ld+json"]')
+                  .length ==
+              0,
+      'Optional metadata from the previous route remained active.',
+    );
+
+    _expect(
+      web.window.location.pathname == '/catalog-view/about' &&
+          pageLifecycleEvents == 0,
+      'Internal route navigation caused a full document reload.',
+    );
+
+    router.push('/catalog-view/unknown?source=direct');
+    await _waitForCatalogRoute(
+      host,
+      'catalog missing:/catalog-view/unknown',
+      'Catalog Not Found',
+    );
+    _expectCatalogHead(
+      title: 'Catalog Not Found',
+      description: 'This catalog route does not exist.',
+      robots: 'noindex, follow',
+    );
+
+    await _waitForWindowEvent('popstate', () => web.window.history.back());
+    await _waitForCatalogRoute(host, 'catalog about', 'Catalog about');
+    _expectCatalogHead(
+      title: 'Catalog about',
+      canonical: 'https://example.test/catalog-view/about/',
+      robots: 'noindex, follow',
+    );
+    await _waitForWindowEvent('popstate', () => web.window.history.forward());
+    await _waitForCatalogRoute(
+      host,
+      'catalog missing:/catalog-view/unknown',
+      'Catalog Not Found',
+    );
+    _expectCatalogHead(
+      title: 'Catalog Not Found',
+      description: 'This catalog route does not exist.',
+      robots: 'noindex, follow',
+    );
+
+    routeView.dispose();
+    _expect(
+      web.document.title == 'Catalog user 17' &&
+          identical(
+            web.document.head!.querySelector('meta[property="og:title"]'),
+            serverOpenGraph,
+          ) &&
+          web.document.head!
+                  .querySelectorAll('script[type="application/ld+json"]')
+                  .length ==
+              1,
+      'Disposing RouteView did not restore the original SSR head.',
+    );
+  } finally {
+    routeView.dispose();
+    router.dispose();
+    web.window.removeEventListener('beforeunload', pageLifecycleListener);
+    web.window.removeEventListener('pagehide', pageLifecycleListener);
+    host.remove();
+    web.document.head!.innerHTML = originalHead;
+    web.document.title = originalTitle;
+    if (originalLanguage == null) {
+      web.document.documentElement?.removeAttribute('lang');
+    } else {
+      web.document.documentElement?.setAttribute('lang', originalLanguage);
+    }
+  }
+}
+
+Future<void> _testCatalogStaticDirectHydration(RouteCatalog catalog) async {
+  const location = '/catalog-view/about?tab=legal';
+  web.window.history.replaceState(null, '', location);
+  final initialHtml = catalog.renderRequest(location, clientScript: null).html;
+  final parsedDocument =
+      web.DOMParser().parseFromString(initialHtml, 'text/html');
+  final serverRoot = parsedDocument.getElementById('app');
+  if (serverRoot?.firstChild == null || parsedDocument.head == null) {
+    throw StateError('The static route did not render server markup.');
+  }
+
+  final originalHead = web.document.head!.innerHTML;
+  final originalTitle = web.document.title;
+  final host = web.document.createElement('div');
+  host.appendChild(serverRoot!.firstChild!.cloneNode(true));
+  final serverPageRoot = host.firstChild;
+  web.document.body!.appendChild(host);
+  web.document.head!.innerHTML = parsedDocument.head!.innerHTML;
+  final router = Router.fromCatalog(catalog: catalog);
+  final routeView = RouteView.fromCatalog(
+    router: router,
+    catalog: catalog,
+    hydrateExisting: true,
+  );
+
+  try {
+    routeView.mountInto(host);
+    _expect(
+      identical(host.firstChild, serverPageRoot) &&
+          host.childNodes.length == 1 &&
+          host.textContent!.contains('catalog about') &&
+          router.currentRoute.value.route?.path == '/catalog-view/about' &&
+          router.currentRoute.value.queryParameters['tab'] == 'legal' &&
+          web.document.title == 'Catalog about',
+      'Direct static-route hydration did not preserve the SSR page.',
+    );
+  } finally {
+    routeView.dispose();
+    router.dispose();
+    host.remove();
+    web.document.head!.innerHTML = originalHead;
+    web.document.title = originalTitle;
+  }
+}
+
+void _testCatalogHydrationMismatch(RouteCatalog catalog) {
+  const location = '/catalog-view/about';
+  web.window.history.replaceState(null, '', location);
+  final initialHtml = catalog.renderRequest(location, clientScript: null).html;
+  final parsedDocument =
+      web.DOMParser().parseFromString(initialHtml, 'text/html');
+  final serverRoot = parsedDocument.getElementById('app');
+  if (serverRoot?.firstChild == null) {
+    throw StateError('The mismatch fixture did not render server markup.');
+  }
+
+  final host = web.document.createElement('div');
+  host.appendChild(serverRoot!.firstChild!.cloneNode(true));
+  final originalRoot = host.firstChild;
+  final text = host.querySelector('h1')?.firstChild;
+  if (text is! web.Text) {
+    throw StateError('The mismatch fixture heading was not rendered as text.');
+  }
+  text.data = 'intentionally mismatched';
+  web.document.body!.appendChild(host);
+  final router = Router.fromCatalog(catalog: catalog);
+  final routeView = RouteView.fromCatalog(
+    router: router,
+    catalog: catalog,
+    hydrateExisting: true,
+  );
+  Object? mismatch;
+  var serverRootPreserved = false;
+
+  try {
+    routeView.mountInto(host);
+  } catch (error) {
+    mismatch = error;
+    serverRootPreserved = identical(host.firstChild, originalRoot);
+  } finally {
+    routeView.dispose();
+    router.dispose();
+    host.remove();
+  }
+
+  _expect(
+    mismatch.toString().contains('Text mismatch at root/h1[0]') &&
+        serverRootPreserved,
+    'Direct-route hydration did not report a useful mismatch diagnostic.',
+  );
+}
+
+Future<void> _waitForCatalogRoute(
+  web.Element host,
+  String expectedText,
+  String expectedTitle,
+) async {
+  final deadline = DateTime.now().add(const Duration(seconds: 5));
+  while (DateTime.now().isBefore(deadline)) {
+    if ((host.textContent?.contains(expectedText) ?? false) &&
+        web.document.title == expectedTitle) {
+      return;
+    }
+    await Future<void>.delayed(Duration.zero);
+  }
+  throw StateError(
+    'Timed out waiting for route "$expectedText" and title "$expectedTitle".',
+  );
+}
+
+void _expectCatalogHead({
+  required String title,
+  String? description,
+  String? canonical,
+  String? robots,
+}) {
+  final head = web.document.head!;
+  _expect(
+    web.document.title == title &&
+        head.querySelector('meta[name="description"]')?.getAttribute(
+                  'content',
+                ) ==
+            description &&
+        head.querySelector('link[rel="canonical"]')?.getAttribute('href') ==
+            canonical &&
+        head.querySelector('meta[property^="og:"]') == null &&
+        head.querySelector('meta[name^="twitter:"]') == null &&
+        head.querySelector('meta[name="robots"]')?.getAttribute('content') ==
+            robots,
+    'Route head metadata was not cleared or restored for "$title".',
+  );
+}
+
+Future<void> _testRouteView() async {
+  web.window.history.replaceState(
+    null,
+    '',
+    '/route-view/users/17?tab=initial',
+  );
+  final router = Router(
+    routes: [
+      RouteDefinition('/route-view/users/:userId'),
+      RouteDefinition('/route-view/about'),
+    ],
+  );
+  final host = web.document.createElement('div');
+  web.document.body!.appendChild(host);
+  var userPageClicks = 0;
+  var pageBuilderCalls = 0;
+  var pageLifecycleEvents = 0;
+  final pageLifecycleListener = ((web.Event _) => pageLifecycleEvents++).toJS;
+  web.window.addEventListener('beforeunload', pageLifecycleListener);
+  web.window.addEventListener('pagehide', pageLifecycleListener);
+
+  final routeView = RouteView(
+    router: router,
+    pageBuilder: (match) {
+      pageBuilderCalls++;
+      if (match.route?.path == '/route-view/users/:userId') {
+        return Column(
+          attributes: const {'data-route-page': 'user'},
+          children: [
+            Heading(1, 'user:${match.params['userId']}'),
+            Text('tab:${match.queryParameters['tab'] ?? ''}', tag: 'p'),
+            Button(
+              label: 'user action',
+              onPressed: (_) => userPageClicks++,
+            ),
+          ],
+        );
+      }
+      return Heading(
+        1,
+        'about page',
+        attributes: const {'data-route-page': 'about'},
+      );
+    },
+    notFoundBuilder: (match) => Heading(
+      1,
+      'not found:${match.path}',
+      attributes: const {'data-route-page': 'not-found'},
+    ),
+  );
+  final shell = component<void>(
+    (_, __) => createElement(
+      'main',
+      children: [
+        createElement('header', children: const ['persistent shell']),
+        routeView,
+      ],
+    ),
+  )(null);
+
+  try {
+    shell.mountInto(host);
+    final shellRoot = host.firstChild;
+    final shellHeader = host.querySelector('header');
+    final initialUserButton =
+        host.querySelector('[data-route-page="user"] button')
+            as web.HTMLButtonElement;
+    _expect(
+      host.textContent!.contains('user:17') &&
+          host.textContent!.contains('tab:initial'),
+      'RouteView did not render the initial matched route',
+    );
+
+    router.push('/route-view/users/42?tab=profile');
+    await _waitForRouteViewText(host, 'user:42');
+    _expect(
+      host.textContent!.contains('tab:profile'),
+      'RouteView did not render updated route parameters and query values',
+    );
+    initialUserButton.click();
+    _expect(
+      userPageClicks == 0,
+      'The previous route view retained its event listener after replacement',
+    );
+
+    final profileUserButton =
+        host.querySelector('[data-route-page="user"] button')
+            as web.HTMLButtonElement;
+    router.push('?tab=settings');
+    await _waitForRouteViewText(host, 'tab:settings');
+    router.push('/route-view/about');
+    await _waitForRouteViewText(host, 'about page');
+    _expect(
+      identical(host.firstChild, shellRoot) &&
+          identical(host.querySelector('header'), shellHeader),
+      'Route navigation replaced the mounted application shell',
+    );
+    profileUserButton.click();
+    _expect(
+      userPageClicks == 0,
+      'A departed route view retained its event listener',
+    );
+
+    router.push('/route-view/missing');
+    await _waitForRouteViewText(host, 'not found:/route-view/missing');
+    router.push('/route-view/users/99?tab=history');
+    await _waitForRouteViewText(host, 'user:99');
+    await _waitForWindowEvent('popstate', () => web.window.history.back());
+    await _waitForRouteViewText(host, 'not found:/route-view/missing');
+    await _waitForWindowEvent('popstate', () => web.window.history.forward());
+    await _waitForRouteViewText(host, 'user:99');
+    _expect(
+      host.textContent!.contains('tab:history'),
+      'Browser back and forward did not update the rendered route view',
+    );
+    (host.querySelector('[data-route-page="user"] button')
+            as web.HTMLButtonElement)
+        .click();
+    _expect(
+      userPageClicks == 1,
+      'The active route view did not retain its event handler',
+    );
+    _expect(
+      pageLifecycleEvents == 0,
+      'Client-side navigation triggered a full-page lifecycle event',
+    );
+
+    final currentUserButton =
+        host.querySelector('[data-route-page="user"] button')
+            as web.HTMLButtonElement;
+    final callsBeforeDispose = pageBuilderCalls;
+    shell.dispose();
+    currentUserButton.click();
+    router.push('/route-view/about');
+    await Future<void>.delayed(Duration.zero);
+    _expect(
+      userPageClicks == 1 &&
+          pageBuilderCalls == callsBeforeDispose &&
+          host.firstChild == null,
+      'Disposing the route shell did not clean up the route view',
+    );
+  } finally {
+    shell.dispose();
+    router.dispose();
+    web.window.removeEventListener('beforeunload', pageLifecycleListener);
+    web.window.removeEventListener('pagehide', pageLifecycleListener);
+    host.remove();
+  }
+}
+
+Future<void> _testBrowserRouter() async {
+  web.window.history.replaceState(
+    null,
+    '',
+    '/router-test/users/7?q=initial#section',
+  );
+  final router = Router(
+    routes: [
+      RouteDefinition('/router-test/users/:userId'),
+      RouteDefinition('/router-test/search'),
+    ],
+  );
+  var isDisposed = false;
+
+  try {
+    _expect(
+      router.currentRoute.value.path == '/router-test/users/7' &&
+          router.param('userId').value == '7' &&
+          router.queryParam('q').value == 'initial' &&
+          router.currentRoute.value.fragment == 'section',
+      'Router did not initialize from the current browser URL',
+    );
+
+    router.push('/router-test/users/42?tab=profile#details');
+    _expect(
+      web.window.location.pathname == '/router-test/users/42' &&
+          web.window.location.search == '?tab=profile' &&
+          web.window.location.hash == '#details' &&
+          router.currentRoute.value.params['userId'] == '42' &&
+          router.param('userId').value == '42' &&
+          router.queryParameters.value['tab'] == 'profile' &&
+          router.queryParam('tab').value == 'profile' &&
+          router.currentRoute.value.fragment == 'details',
+      'Router.push did not update the URL and route signals',
+    );
+
+    router.push('?tab=settings');
+    _expect(
+      web.window.location.pathname == '/router-test/users/42' &&
+          web.window.location.search == '?tab=settings' &&
+          web.window.location.hash.isEmpty &&
+          router.currentRoute.value.queryParameters['tab'] == 'settings' &&
+          router.currentRoute.value.fragment.isEmpty,
+      'Query-only navigation did not preserve the path or replace query state',
+    );
+
+    router.push('#top');
+    _expect(
+      web.window.location.hash == '#top' &&
+          router.currentRoute.value.fragment == 'top',
+      'Fragment-only navigation did not update the route fragment',
+    );
+
+    router.push('/router-test/search?stage=one');
+    router.push('/router-test/search?stage=two');
+    await _waitForWindowEvent('popstate', () => web.window.history.back());
+    _expect(
+      web.window.location.search == '?stage=one' &&
+          router.currentRoute.value.path == '/router-test/search' &&
+          router.queryParam('stage').value == 'one',
+      'Browser back did not synchronize the URL and route state',
+    );
+    await _waitForWindowEvent('popstate', () => web.window.history.forward());
+    _expect(
+      web.window.location.search == '?stage=two' &&
+          router.queryParam('stage').value == 'two',
+      'Browser forward did not synchronize the URL and route state',
+    );
+
+    router.push('/router-test/not-found');
+    _expect(
+      router.currentRoute.value.isNotFound &&
+          router.currentRoute.value.path == '/router-test/not-found',
+      'Router did not transition to a not-found match',
+    );
+    await _waitForWindowEvent('popstate', () => web.window.history.back());
+    _expect(
+      !router.currentRoute.value.isNotFound &&
+          web.window.location.search == '?stage=two',
+      'Browser back did not leave the not-found match',
+    );
+    await _waitForWindowEvent('popstate', () => web.window.history.forward());
+    _expect(
+      router.currentRoute.value.isNotFound &&
+          web.window.location.pathname == '/router-test/not-found',
+      'Browser forward did not restore the not-found match',
+    );
+
+    final intercepted = _dispatchRouterAnchorClick(
+      '/router-test/search?q=anchor',
+    );
+    _expect(
+      intercepted &&
+          web.window.location.pathname == '/router-test/search' &&
+          web.window.location.search == '?q=anchor' &&
+          router.currentRoute.value.route?.path == '/router-test/search' &&
+          router.queryParam('q').value == 'anchor',
+      'Same-origin anchor navigation was not intercepted by the router',
+    );
+
+    _expect(
+      !_dispatchRouterAnchorClick('https://outside.example/path'),
+      'The router intercepted an external link',
+    );
+    _expect(
+      !_dispatchRouterAnchorClick(
+            '/router-test/users/1',
+            ctrlKey: true,
+          ) &&
+          !_dispatchRouterAnchorClick(
+            '/router-test/users/1',
+            metaKey: true,
+          ) &&
+          !_dispatchRouterAnchorClick(
+            '/router-test/users/1',
+            shiftKey: true,
+          ) &&
+          !_dispatchRouterAnchorClick(
+            '/router-test/users/1',
+            altKey: true,
+          ),
+      'The router intercepted a modified click',
+    );
+    _expect(
+      !_dispatchRouterAnchorClick(
+        '/router-test/users/1',
+        download: true,
+      ),
+      'The router intercepted a download link',
+    );
+    _expect(
+      !_dispatchRouterAnchorClick(
+        '/router-test/users/1',
+        target: '_blank',
+      ),
+      'The router intercepted a non-self target',
+    );
+    _expect(
+      !_dispatchRouterAnchorClick(
+        '/router-test/users/1',
+        rel: 'external',
+      ),
+      'The router intercepted a rel=external link',
+    );
+
+    final target = web.document.createElement('div')
+      ..setAttribute('id', 'router-fragment-target');
+    web.document.body!.appendChild(target);
+    final fragmentChange = _waitForWindowEvent(
+      'hashchange',
+      () => _dispatchRouterAnchorClick(
+        '#router-fragment-target',
+        suppressNativeBehavior: false,
+      ),
+    );
+    await fragmentChange;
+    _expect(
+      web.window.location.hash == '#router-fragment-target' &&
+          router.currentRoute.value.fragment == 'router-fragment-target',
+      'Native fragment navigation did not update the router on hashchange',
+    );
+    target.remove();
+
+    router.push('/router-test/search?q=before-dispose');
+    final disposedMatch = router.currentRoute.value;
+    router.dispose();
+    isDisposed = true;
+
+    var pushAfterDisposeFailed = false;
+    try {
+      router.push('/router-test/users/99');
+    } on StateError {
+      pushAfterDisposeFailed = true;
+    }
+    _expect(
+      pushAfterDisposeFailed,
+      'Router.push succeeded after Router.dispose',
+    );
+
+    web.window.history.pushState(null, '', '/router-test/users/99');
+    await _waitForWindowEvent('popstate', () => web.window.history.back());
+    _expect(
+      web.window.location.pathname == '/router-test/search' &&
+          web.window.location.search == '?q=before-dispose' &&
+          identical(router.currentRoute.value, disposedMatch),
+      'A disposed router continued updating after browser history navigation',
+    );
+    _expect(
+      !_dispatchRouterAnchorClick('/router-test/users/99'),
+      'A disposed router continued intercepting document clicks',
+    );
+  } finally {
+    if (!isDisposed) router.dispose();
+  }
+}
+
+Future<void> _waitForRouteViewText(web.Element host, String expected) async {
+  final deadline = DateTime.now().add(const Duration(seconds: 5));
+  while (DateTime.now().isBefore(deadline)) {
+    if (host.textContent?.contains(expected) ?? false) return;
+    await Future<void>.delayed(Duration.zero);
+  }
+  throw StateError('Timed out waiting for route view text "$expected".');
+}
+
+Future<void> _waitForWindowEvent(
+  String type,
+  void Function() action,
+) async {
+  final completed = Completer<void>();
+  late final JSFunction listener;
+  listener = ((web.Event _) {
+    if (completed.isCompleted) return;
+    web.window.removeEventListener(type, listener);
+    completed.complete();
+  }).toJS;
+  web.window.addEventListener(type, listener);
+  try {
+    action();
+    await completed.future.timeout(
+      const Duration(seconds: 5),
+      onTimeout: () => throw StateError('Timed out waiting for $type.'),
+    );
+  } finally {
+    web.window.removeEventListener(type, listener);
+  }
+}
+
+bool _dispatchRouterAnchorClick(
+  String href, {
+  bool ctrlKey = false,
+  bool metaKey = false,
+  bool shiftKey = false,
+  bool altKey = false,
+  bool download = false,
+  String? target,
+  String? rel,
+  bool suppressNativeBehavior = true,
+}) {
+  final host = web.document.createElement('div');
+  final anchor = web.document.createElement('a') as web.HTMLAnchorElement;
+  anchor.href = href;
+  if (download) anchor.setAttribute('download', '');
+  if (target != null) anchor.target = target;
+  if (rel != null) anchor.rel = rel;
+  host.appendChild(anchor);
+  web.document.body!.appendChild(host);
+
+  bool? routerPreventedDefault;
+  final observer = ((web.Event event) {
+    routerPreventedDefault = event.defaultPrevented;
+    if (suppressNativeBehavior) event.preventDefault();
+  }).toJS;
+  web.document.addEventListener('click', observer);
+  try {
+    final init = web.MouseEventInit(button: 0)
+      ..bubbles = true
+      ..cancelable = true
+      ..ctrlKey = ctrlKey
+      ..metaKey = metaKey
+      ..shiftKey = shiftKey
+      ..altKey = altKey;
+    anchor.dispatchEvent(web.MouseEvent('click', init));
+    final prevented = routerPreventedDefault;
+    if (prevented == null) {
+      throw StateError('The test click did not reach the document.');
+    }
+    return prevented;
+  } finally {
+    web.document.removeEventListener('click', observer);
+    host.remove();
+  }
 }
 
 void _expect(bool condition, String message) {

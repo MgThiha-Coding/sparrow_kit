@@ -8,6 +8,7 @@ Future<int> buildWeb(
   Directory project, {
   String? outputOverride,
   bool development = false,
+  Map<String, String> defines = const {},
 }) async {
   final configFile = File(p.join(project.path, 'sparrow.json'));
   if (!await configFile.exists()) {
@@ -26,6 +27,7 @@ Future<int> buildWeb(
   if (!await server.exists()) {
     throw FileSystemException('Server entry point not found', server.path);
   }
+  final defineArguments = _defineArguments(defines);
 
   final analysis = await _runDart(
     ['analyze', client.path, server.path],
@@ -39,50 +41,77 @@ Future<int> buildWeb(
   );
   final webAssets = Directory(p.join(project.path, 'web'));
   await _validateOutputDirectory(project, output, webAssets);
-  await _emptyDirectory(output);
-  await output.create(recursive: true);
-  await _copyWebAssets(webAssets, output);
-
+  final staging = Directory(
+    '${output.path}.sparrow-stage-$pid-${DateTime.now().microsecondsSinceEpoch}',
+  );
+  await _validateOutputDirectory(project, staging, webAssets);
+  await staging.parent.create(recursive: true);
+  await staging.create();
+  var published = false;
   final clientOutput = _safeRelativePath(config.clientOutput);
   final clientScript = '/${clientOutput.replaceAll('\\', '/')}';
-  final serverBuild = await _runDart(
-    ['run', server.path, output.path, clientScript],
-    project,
-  );
-  if (serverBuild != 0) return serverBuild;
+  try {
+    await _copyWebAssets(
+      webAssets,
+      staging,
+      development: development,
+    );
 
-  final compiledClient =
-      File(p.joinAll([output.path, ...p.split(clientOutput)]));
-  await compiledClient.parent.create(recursive: true);
-  final clientBuild = await _runDart(
-    [
-      'compile',
-      'js',
-      client.path,
-      development ? '-O0' : '-O2',
-      '-o',
-      compiledClient.path,
-    ],
-    project,
-  );
-  if (clientBuild != 0) return clientBuild;
+    final serverBuild = await _runDart(
+      [...defineArguments, 'run', server.path, staging.path, clientScript],
+      project,
+    );
+    if (serverBuild != 0) return serverBuild;
 
-  if (!development) {
-    stdout.writeln('Built Sparrow Kit web app to ${output.path}');
+    final compiledClient =
+        File(p.joinAll([staging.path, ...p.split(clientOutput)]));
+    await compiledClient.parent.create(recursive: true);
+    final clientBuild = await _runDart(
+      [
+        'compile',
+        'js',
+        ...defineArguments,
+        client.path,
+        development ? '-O0' : '-O2',
+        if (!development) '--no-source-maps',
+        '-o',
+        compiledClient.path,
+      ],
+      project,
+    );
+    if (clientBuild != 0) return clientBuild;
+    if (!development) {
+      final compilerDependencies = File('${compiledClient.path}.deps');
+      if (await compilerDependencies.exists()) {
+        await compilerDependencies.delete();
+      }
+    }
+
+    await _publishOutput(staging, output);
+    published = true;
+    if (!development) {
+      stdout.writeln('Built Sparrow Kit web app to ${output.path}');
+    }
+    return 0;
+  } finally {
+    if (!published && await staging.exists()) {
+      await staging.delete(recursive: true);
+    }
   }
-  return 0;
 }
 
 Future<int> runDevServer(
   Directory project, {
   required String host,
   required int port,
+  Map<String, String> defines = const {},
 }) async {
   final outputPath = 'build/sparrow_dev';
   final initialBuild = await buildWeb(
     project,
     outputOverride: outputPath,
     development: true,
+    defines: defines,
   );
   if (initialBuild != 0) return initialBuild;
 
@@ -112,40 +141,69 @@ Future<int> runDevServer(
   Timer? debounce;
   var building = false;
   var rebuildQueued = false;
+  var shuttingDown = false;
+  final stopped = Completer<void>();
+  Future<void>? activeRebuild;
+
+  void requestShutdown() {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    rebuildQueued = false;
+    stopped.complete();
+  }
+
   Future<void> rebuild() async {
     if (building) {
       rebuildQueued = true;
       return;
     }
     building = true;
-    do {
-      rebuildQueued = false;
-      stdout.writeln('Changes detected. Rebuilding...');
-      try {
-        final result = await buildWeb(
-          project,
-          outputOverride: outputPath,
-          development: true,
-        );
-        if (result == 0) {
-          await _notifyReloadClients(clients);
-          stdout.writeln('Rebuilt successfully.');
-        } else {
-          stderr.writeln('Rebuild failed with exit code $result.');
+    try {
+      do {
+        rebuildQueued = false;
+        stdout.writeln('Changes detected. Rebuilding...');
+        try {
+          final result = await buildWeb(
+            project,
+            outputOverride: outputPath,
+            development: true,
+            defines: defines,
+          );
+          if (result == 0) {
+            if (!shuttingDown) await _notifyReloadClients(clients);
+            stdout.writeln('Rebuilt successfully.');
+          } else {
+            stderr.writeln('Rebuild failed with exit code $result.');
+          }
+        } on Object catch (error, stackTrace) {
+          stderr
+            ..writeln('Rebuild failed: $error')
+            ..writeln(stackTrace);
         }
-      } on Object catch (error, stackTrace) {
-        stderr
-          ..writeln('Rebuild failed: $error')
-          ..writeln(stackTrace);
-      }
-    } while (rebuildQueued);
-    building = false;
+      } while (rebuildQueued && !shuttingDown);
+    } finally {
+      building = false;
+    }
+  }
+
+  void startRebuild() {
+    if (shuttingDown) return;
+    if (building) {
+      rebuildQueued = true;
+      return;
+    }
+    activeRebuild = rebuild().catchError((Object error, StackTrace stackTrace) {
+      stderr
+        ..writeln('Rebuild failed: $error')
+        ..writeln(stackTrace);
+    });
   }
 
   void scheduleBuild() {
+    if (shuttingDown) return;
     debounce?.cancel();
     debounce = Timer(const Duration(milliseconds: 300), () {
-      unawaited(rebuild());
+      startRebuild();
     });
   }
 
@@ -169,21 +227,56 @@ Future<int> runDevServer(
   );
 
   stdout.writeln('Sparrow dev server running at http://$host:$port');
-  final stopped = Completer<void>();
-  final signalSubscription = ProcessSignal.sigint.watch().listen((_) {
-    if (!stopped.isCompleted) stopped.complete();
-  });
+  final signalSubscriptions = <StreamSubscription<ProcessSignal>>[
+    ProcessSignal.sigint.watch().listen((_) => requestShutdown()),
+    if (!Platform.isWindows)
+      ProcessSignal.sigterm.watch().listen((_) => requestShutdown()),
+  ];
+  final stdinSubscription = stdin.hasTerminal
+      ? null
+      : stdin.listen(
+          (_) {},
+          onDone: requestShutdown,
+          onError: (Object error, StackTrace stackTrace) {
+            stderr
+              ..writeln('Dev server stdin error: $error')
+              ..writeln(stackTrace);
+            requestShutdown();
+          },
+        );
+
   try {
     await stopped.future;
   } finally {
     debounce?.cancel();
-    await signalSubscription.cancel();
-    for (final subscription in subscriptions) {
-      await subscription.cancel();
+    try {
+      if (stdinSubscription != null) await stdinSubscription.cancel();
+    } finally {
+      try {
+        await server.close(force: true);
+      } finally {
+        try {
+          await serverSubscription.cancel();
+        } finally {
+          try {
+            for (final subscription in subscriptions) {
+              await subscription.cancel();
+            }
+          } finally {
+            try {
+              final rebuild = activeRebuild;
+              if (rebuild != null) await rebuild;
+            } finally {
+              for (final subscription in signalSubscriptions) {
+                await subscription.cancel();
+              }
+            }
+          }
+        }
+      }
     }
-    await serverSubscription.cancel();
-    await server.close(force: true);
   }
+  stdout.writeln('Sparrow dev server stopped.');
   return 0;
 }
 
@@ -286,10 +379,17 @@ File _projectFile(Directory project, String relativePath) =>
 Directory _projectDirectory(Directory project, String relativePath) =>
     Directory(p.joinAll([project.path, ...p.split(relativePath)]));
 
-Future<void> _copyWebAssets(Directory source, Directory output) async {
+Future<void> _copyWebAssets(
+  Directory source,
+  Directory output, {
+  required bool development,
+}) async {
   if (!await source.exists()) return;
   await for (final entity in source.list(recursive: true, followLinks: false)) {
-    if (entity is! File || entity.path.toLowerCase().endsWith('.dart')) {
+    final path = entity.path.toLowerCase();
+    if (entity is! File ||
+        path.endsWith('.dart') ||
+        (!development && path.endsWith('.map'))) {
       continue;
     }
     final relativePath = p.relative(entity.path, from: source.path);
@@ -299,25 +399,81 @@ Future<void> _copyWebAssets(Directory source, Directory output) async {
   }
 }
 
-Future<void> _emptyDirectory(Directory directory) async {
-  if (!await directory.exists()) return;
-  await for (final entity in directory.list(followLinks: false)) {
-    await entity.delete(recursive: true);
-  }
-}
-
 Future<int> _runDart(List<String> arguments, Directory project) async {
   final result = await Process.run(
     'dart',
     arguments,
     workingDirectory: project.path,
-    runInShell: true,
   );
   final stdoutText = result.stdout.toString();
   final stderrText = result.stderr.toString();
   if (stdoutText.isNotEmpty) stdout.write(stdoutText);
   if (stderrText.isNotEmpty) stderr.write(stderrText);
   return result.exitCode;
+}
+
+List<String> _defineArguments(Map<String, String> defines) {
+  final entries = defines.entries.toList()
+    ..sort((first, second) => first.key.compareTo(second.key));
+  for (final entry in entries) {
+    if (!RegExp(r'^[A-Za-z_][A-Za-z0-9_.-]*$').hasMatch(entry.key) ||
+        entry.key.contains('\u0000') ||
+        entry.value.contains('\u0000')) {
+      throw ArgumentError(
+        'Invalid build define "${entry.key}": names must start with a letter '
+        'or underscore and contain only letters, digits, ".", "_" or "-"; '
+        'values cannot contain NUL.',
+      );
+    }
+  }
+  return [
+    for (final entry in entries) '--define=${entry.key}=${entry.value}',
+  ];
+}
+
+Future<void> _publishOutput(Directory staging, Directory output) async {
+  await output.parent.create(recursive: true);
+  final existingType = await FileSystemEntity.type(
+    output.path,
+    followLinks: false,
+  );
+  if (existingType == FileSystemEntityType.file ||
+      existingType == FileSystemEntityType.link) {
+    throw ArgumentError.value(
+      output.path,
+      'output',
+      'Build output path is occupied by a file or symbolic link.',
+    );
+  }
+  if (existingType != FileSystemEntityType.directory) {
+    await staging.rename(output.path);
+    return;
+  }
+
+  final swapDirectory = await output.parent.createTemp('.sparrow-output-swap-');
+  final previousOutput = Directory(p.join(swapDirectory.path, 'previous'));
+  var preserveBackup = false;
+  try {
+    await output.rename(previousOutput.path);
+    try {
+      await staging.rename(output.path);
+    } catch (error, stackTrace) {
+      try {
+        await previousOutput.rename(output.path);
+      } catch (restoreError) {
+        preserveBackup = true;
+        throw StateError(
+          'Publishing the new build failed: $error. The previous output could '
+          'not be restored: $restoreError. It remains at ${previousOutput.path}.',
+        );
+      }
+      Error.throwWithStackTrace(error, stackTrace);
+    }
+  } finally {
+    if (!preserveBackup && await swapDirectory.exists()) {
+      await swapDirectory.delete(recursive: true);
+    }
+  }
 }
 
 Future<void> _serveRequest(

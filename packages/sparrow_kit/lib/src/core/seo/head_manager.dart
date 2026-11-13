@@ -16,7 +16,8 @@ class HeadManager {
   final String _originalTitle;
   final String? _originalLanguage;
   final Map<String, _MetaBinding> _metaBindings = {};
-  final List<web.HTMLScriptElement> _jsonLdScripts = [];
+  final List<_JsonLdBinding> _jsonLdBindings = [];
+  bool _jsonLdInitialized = false;
   _LinkBinding? _canonicalBinding;
   void Function()? _watchDisposer;
   bool _isDisposed = false;
@@ -78,10 +79,17 @@ class HeadManager {
       _canonicalBinding = null;
     }
 
-    for (final script in _jsonLdScripts) {
-      script.remove();
+    for (final binding in _jsonLdBindings) {
+      if (binding.isCreated) {
+        binding.element.remove();
+      } else {
+        binding.element.textContent = binding.originalText;
+        if (binding.element.parentNode == null) {
+          web.document.head?.appendChild(binding.element);
+        }
+      }
     }
-    _jsonLdScripts.clear();
+    _jsonLdBindings.clear();
     web.document.title = _originalTitle;
     final documentElement = web.document.documentElement;
     if (documentElement != null) {
@@ -107,8 +115,7 @@ class HeadManager {
 
     for (final entry in _metaBindings.entries.toList()) {
       if (!desired.containsKey(entry.key)) {
-        _restoreMeta(entry.value);
-        _metaBindings.remove(entry.key);
+        _deactivateMeta(entry.value);
       }
     }
 
@@ -117,8 +124,18 @@ class HeadManager {
         entry.key,
         () => _createMetaBinding(head, entry.value),
       );
+      if (!binding.isActive) {
+        head.appendChild(binding.element);
+        binding.isActive = true;
+      }
       binding.element.setAttribute('content', entry.value.content);
     }
+  }
+
+  void _deactivateMeta(_MetaBinding binding) {
+    if (!binding.isActive) return;
+    binding.element.remove();
+    binding.isActive = false;
   }
 
   _MetaBinding _createMetaBinding(web.HTMLHeadElement head, MetaTag tag) {
@@ -131,6 +148,7 @@ class HeadManager {
           element: node,
           originalContent: node.getAttribute('content'),
           isCreated: false,
+          isActive: true,
         );
       }
     }
@@ -138,7 +156,11 @@ class HeadManager {
     final element = web.document.createElement('meta') as web.HTMLMetaElement;
     element.setAttribute(tag.attribute, tag.key);
     head.appendChild(element);
-    return _MetaBinding(element: element, isCreated: true);
+    return _MetaBinding(
+      element: element,
+      isCreated: true,
+      isActive: true,
+    );
   }
 
   void _restoreMeta(_MetaBinding binding) {
@@ -151,6 +173,9 @@ class HeadManager {
       } else {
         binding.element.setAttribute('content', originalContent);
       }
+      if (binding.element.parentNode == null) {
+        web.document.head?.appendChild(binding.element);
+      }
     }
   }
 
@@ -158,14 +183,23 @@ class HeadManager {
     if (canonicalUrl == null) {
       final binding = _canonicalBinding;
       if (binding != null) {
-        _restoreCanonical(binding);
-        _canonicalBinding = null;
+        _deactivateCanonical(binding);
       }
       return;
     }
 
     final binding = _canonicalBinding ??= _createCanonicalBinding(head);
+    if (!binding.isActive) {
+      head.appendChild(binding.element);
+      binding.isActive = true;
+    }
     binding.element.href = canonicalUrl;
+  }
+
+  void _deactivateCanonical(_LinkBinding binding) {
+    if (!binding.isActive) return;
+    binding.element.remove();
+    binding.isActive = false;
   }
 
   _LinkBinding _createCanonicalBinding(web.HTMLHeadElement head) {
@@ -175,13 +209,18 @@ class HeadManager {
         element: existing,
         originalHref: existing.getAttribute('href'),
         isCreated: false,
+        isActive: true,
       );
     }
 
     final element = web.document.createElement('link') as web.HTMLLinkElement;
     element.rel = 'canonical';
     head.appendChild(element);
-    return _LinkBinding(element: element, isCreated: true);
+    return _LinkBinding(
+      element: element,
+      isCreated: true,
+      isActive: true,
+    );
   }
 
   void _restoreCanonical(_LinkBinding binding) {
@@ -194,6 +233,9 @@ class HeadManager {
       } else {
         binding.element.setAttribute('href', originalHref);
       }
+      if (binding.element.parentNode == null) {
+        web.document.head?.appendChild(binding.element);
+      }
     }
   }
 
@@ -201,21 +243,53 @@ class HeadManager {
     web.HTMLHeadElement head,
     List<JsonLdSchema> schemas,
   ) {
+    if (!_jsonLdInitialized) {
+      _jsonLdInitialized = true;
+      final scripts = head.querySelectorAll(
+        'script[type="application/ld+json"]',
+      );
+      for (var index = 0; index < scripts.length; index++) {
+        final script = scripts.item(index);
+        if (script is web.HTMLScriptElement) {
+          _jsonLdBindings.add(
+            _JsonLdBinding(
+              element: script,
+              originalText: script.textContent,
+              isCreated: false,
+              isActive: true,
+            ),
+          );
+        }
+      }
+    }
+
     for (var index = 0; index < schemas.length; index++) {
-      if (index == _jsonLdScripts.length) {
+      if (index == _jsonLdBindings.length) {
         final script =
             web.document.createElement('script') as web.HTMLScriptElement;
         script.type = 'application/ld+json';
-        head.appendChild(script);
-        _jsonLdScripts.add(script);
+        _jsonLdBindings.add(
+          _JsonLdBinding(
+            element: script,
+            originalText: null,
+            isCreated: true,
+            isActive: false,
+          ),
+        );
       }
-      _jsonLdScripts[index].textContent = jsonEncode(
-        schemas[index].toJsonLd(),
-      );
+      final binding = _jsonLdBindings[index];
+      if (!binding.isActive) {
+        head.appendChild(binding.element);
+        binding.isActive = true;
+      }
+      binding.element.textContent = jsonEncode(schemas[index].toJsonLd());
     }
 
-    while (_jsonLdScripts.length > schemas.length) {
-      _jsonLdScripts.removeLast().remove();
+    for (var index = schemas.length; index < _jsonLdBindings.length; index++) {
+      final binding = _jsonLdBindings[index];
+      if (!binding.isActive) continue;
+      binding.element.remove();
+      binding.isActive = false;
     }
   }
 }
@@ -224,22 +298,40 @@ class _MetaBinding {
   _MetaBinding({
     required this.element,
     required this.isCreated,
+    required this.isActive,
     this.originalContent,
   });
 
   final web.HTMLMetaElement element;
   final String? originalContent;
   final bool isCreated;
+  bool isActive;
 }
 
 class _LinkBinding {
   _LinkBinding({
     required this.element,
     required this.isCreated,
+    required this.isActive,
     this.originalHref,
   });
 
   final web.HTMLLinkElement element;
   final String? originalHref;
   final bool isCreated;
+  bool isActive;
+}
+
+class _JsonLdBinding {
+  _JsonLdBinding({
+    required this.element,
+    required this.originalText,
+    required this.isCreated,
+    required this.isActive,
+  });
+
+  final web.HTMLScriptElement element;
+  final String? originalText;
+  final bool isCreated;
+  bool isActive;
 }
