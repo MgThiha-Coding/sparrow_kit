@@ -33,26 +33,26 @@ Future<int> runSparrowCli(List<String> arguments) async {
       if (arguments.length < 2 || arguments[1] != 'web') {
         return _usageError('sparrow build web');
       }
+      late final Map<String, String> defines;
       try {
-        return buildWeb(
-          Directory.current,
-          defines: _parseBuildDefines(arguments.skip(2).toList()),
-        );
+        defines = _parseBuildDefines(arguments.skip(2).toList());
       } on FormatException catch (error) {
         return _usageError(error.message);
       }
+      return buildWeb(Directory.current, defines: defines);
     case 'dev':
+      late final _DevOptions options;
       try {
-        final options = _parseDevOptions(arguments.skip(1).toList());
-        return runDevServer(
-          Directory.current,
-          host: options.host,
-          port: options.port,
-          defines: options.defines,
-        );
+        options = _parseDevOptions(arguments.skip(1).toList());
       } on FormatException catch (error) {
         return _usageError(error.message);
       }
+      return runDevServer(
+        Directory.current,
+        host: options.host,
+        port: options.port,
+        defines: options.defines,
+      );
     default:
       return _usageError('Unknown command "${arguments.first}".');
   }
